@@ -6,3 +6,5 @@ mlruns/
 .venv/
 .env
 dataset/
+rag_store/
+models/
