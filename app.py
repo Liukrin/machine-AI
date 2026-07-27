@@ -20,8 +20,8 @@ st.set_page_config(
 # ============================================================
 @st.cache_data
 def load_data():
-    data = np.load("app_data/demo_windows.npz", allow_pickle=True)
-    return data
+    with np.load("app_data/demo_windows.npz", allow_pickle=True) as z:
+        return {k: z[k] for k in z.files}
 
 data = load_data()
 
