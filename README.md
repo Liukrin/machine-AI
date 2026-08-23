@@ -1,123 +1,92 @@
-# 复杂流体动力装备预测性维护平台 — 基于时序基础模型的偏离检出与诊断闭环
+# 机械设备运维知识问答 RAG 平台
 
-液压系统冷却器/换向阀/液压泵/蓄能器四组件故障检测，Chronos-Bolt 零样本健康波形延拓 + 确定性物理判决 + LangGraph 三节点诊断闭环。
+一个面向设备维修手册的检索增强生成（RAG）问答系统。把厂商 PDF 手册接入「解析 → 清洗切分 → 向量/BM25 索引 → 混合检索 → Agent 编排 → 流式问答」全链路，前端流式输出答案，并对知识库覆盖不到的问题显式拒答、对生成答案做引用校验以避免幻觉。全程本地离线加载模型，开发环境使用，不上生产。
 
-## 在线演示
-
-Demo 链接：（部署后填写）
+> 本仓库由早期的液压系统时序预测性维护项目演化而来（阶段一～五记录于 [docs/process_log.md](docs/process_log.md)），当前主线为 S1–S5 的手册 RAG 管线。
 
 ## 架构
 
 ```mermaid
-graph TD
-    A[数据管道<br/>100Hz/10Hz/1Hz 多传感器<br/>秒级对齐张量 31ch×60steps] --> B[Chronos 偏离检出<br/>健康波形 context=300pt<br/>预测 q10/q50/q90 置信带]
-    B --> C[确定性判决<br/>s_level/s_shape 分解<br/>P95 阈值 + 连续越界规则<br/>禁止 LLM 触碰告警分级]
-    C --> D[RAG 检索<br/>Chroma + bge-small-zh<br/>12 条知识库 + 拒答阈值<br/>component/severity 双闸过滤]
-    D --> E[LangGraph 三节点<br/>Watcher → Diagnostician → Reporter<br/>条件路由:正常→END,无检索→拒绝]
-    E --> F[工单输出<br/>JSON + Markdown<br/>引用校验 + 严重度审计]
+flowchart LR
+    A["S1 解析<br/>MinerU 解析 4 份 PDF<br/>→ blocks.jsonl"] --> B["S2 切分 + 索引<br/>清洗合并 457 chunk<br/>bge-small-zh 向量 + Chroma<br/>BM25 索引"]
+    B --> C["S3 混合检索<br/>BM25 + 向量 RRF 融合<br/>top_k=10"]
+    C --> D["S4 Agent 编排<br/>LangGraph 四节点<br/>retrieve→generate→verify→format<br/>拒答闸 + 引用校验"]
+    D --> E["S5 前后端<br/>FastAPI SSE 流式<br/>Vite + React 前端"]
 ```
 
-## 核心结果
+## 核心数据
 
-### 阶段一：GroupKFold 分组留出验证
+- **语料**：4 份手册 → 457 个 chunk（text 328 / table 129）
+- **评测集**：36 题（easy 14 / medium 17 / hard 5；text 29 / table 7）
+- **三轮检索对比**（36 题，top_k=10，最终采用混合检索）：
 
-| 组件 | RF Stratified | RF GroupKFold | 跌幅 | XGB Stratified | XGB GroupKFold | 跌幅 |
-|---|---|---|---|---|---|---|
-| Cooler | 1.0000 | 1.0000 | 0% | 1.0000 | 0.9993 | 0.07% |
-| Valve | 0.9841 | 0.9381 | -4.63% | 0.9841 | 0.9409 | -4.34% |
-| Pump | 0.9938 | 0.9878 | -0.60% | 0.9917 | 0.9764 | -1.53% |
-| Acc | 0.9883 | 0.8731 | -11.65% | 0.9848 | 0.9114 | -7.43% |
+| 指标 | 基线（纯向量） | 混合（BM25+向量） | 混合 + rerank | 最终采用 |
+| --- | --- | --- | --- | --- |
+| Recall@1 | 0.583 | **0.778** | 0.639 | 混合 |
+| Recall@10 | 0.944 | 0.944 | 0.972 | 混合 |
+| MRR@10 | 0.720 | **0.836** | 0.765 | 混合 |
 
-随机分层显著高估模型能力，GroupKFold 分组留出揭示真实泛化差距。
+## 关键取舍
 
-### 阶段二：Cooler 偏离检出
+1. **混合检索采用**。BM25 + 向量 RRF 融合：总体 R@1 0.583→0.778（+0.194）、MRR@10 0.720→0.836，table 的 R@1 0.143→0.429（翻三倍）。BM25 的字面匹配补上「问题 → 精确片段 / 表头 / 数字」的信号。
 
-| 指标 | 值 |
-|---|---|
-| 检出率 (故障窗口 A 类) | 1.0000 |
-| 近距误报率 (同块健康 B 类) | 0.0000 |
-| 远距误报率 (跨块健康 C 类) | 0.0667 |
+2. **rerank 弃用**。全局 CrossEncoder 精排把总体 R@1 从 0.778 打到 0.639（−0.139）；虽把 hard R@10 0.60→0.80、table R@10 0.714→0.857，但 7 条正文题被降权、单题 +3.07s（36 题共 110.7s）。text 占 29/36，全局精排净亏，脚本保留、config 置 `enabled: false`。
 
-### 三方对照：Chronos 分解法 / Naive last-value / 平凡均值法
-
-| Method | A Detection | B FPR | C FPR |
-|---|---|---|---|
-| Chronos decomposition | 1.0000 | 0.0000 | 0.0667 |
-| Naive last-value | 1.0000 | 0.0000 | 0.2333 |
-| Trivial mean | 1.0000 | 0.0000 | 0.0667 |
-
-**在 cooler 上，Chronos 未带来超出平凡均值法的任何增益。** 100% 检出完全来自 s_level（基线温度偏移），Chronos 的点预测精度（MAE 0.56°C）与 trivial 持平。
-
-### Valve 五轮实验总表
-
-| Method | A(73) | A(80) | A(90) | B FPR | C FPR | 失败原因 |
-|---|---|---|---|---|---|---|
-| Chronos ps1_mean | 0.00 | 0.00 | 0.00 | 0.00 | 0.10 | 通道受 cooler 主导，valve 信号≈0 |
-| Chronos ps1_ptp | 0.60 | 0.00 | 0.00 | 0.67 | 1.00 | A/B/C s_level 分布完全重叠 |
-| Chronos ps2_std | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 预检通过但 Chronos 残差分离失败 |
-| ΔP nearest | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 阈值被 pump-crossing 配对的漂移挟持 |
-| ΔP matched | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | accumulator 变化也推高 dp12 漂移 |
-| ΔP systemic | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | acc=130↔{100,115} 残余 bimodal |
-
-**valve 全部检测器检出率为零。** 根本原因：蓄能器档位跳变引起的 dp12 波动（0.87–0.90 bar）大于所有 valve 故障信号（0.20–0.83 bar），单通道无法分离。
-
-## 诚实性声明
-
-1. **Chronos 在 cooler 和 valve 上均未跑赢平凡均值基线。** cooler 上三类方法检出率完全一致；valve 上 Chronos 检出 60%（ps1_ptp）但 B 类误报 67%，无区分力。
-2. **Valve 单通道检测因故障叠加而结构性不可行。** dp12 同时响应 valve 故障（0.20–0.83 bar）和 accumulator/pump 状态变化（0.17–1.03 bar），后者覆盖前者。
-3. **RAG 拒答阈值留出验证为 4/6。** 语义邻近的查询（"冷却水塔风机"→cooler-02、"电磁阀线圈"→valve-03）会穿过阈值。τ_retrieval=0.62 不做调整，如实记录。
-4. **知识库定量数字经过回溯审计。** 审计脚本 `tests/test_knowledge.py`，审计记录详见 [docs/process_log.md](docs/process_log.md) 条目 31–33。
+3. **拒答阈值重叠**。拒答闸取向量 top-1 distance 的 τ=0.3567（正样本 P95），但负样本「挖掘机液压泵」distance 0.3347 已穿过阈值。语义邻近查询与正样本无清晰间隔，单一距离闸挡不住——按正样本 P95 取值并如实记录，不调参补救。
 
 ## 快速启动
 
+环境要求：Python 3.11+（依赖见 [requirements.txt](requirements.txt)）、Node 18+。
+
 ```bash
-pip install -r requirements.txt       # 仅需 streamlit plotly numpy pandas
-python src/build_rag.py               # 构建向量库（需 chromadb, sentence-transformers）
-streamlit run app.py                  # 启动 Demo（无需原始数据，无需 GPU）
+# 1. 配置 LLM key（.env 填 DEEPSEEK_API_KEY=sk-...）
+
+# 2. 后端（FastAPI + SSE，端口 8000）
+python -m uvicorn src.s5_app.api:app --host 127.0.0.1 --port 8000
+# 或 python src/s5_app/api.py
+
+# 3. 前端（Vite + React，端口 5173）
+cd frontend
+npm install
+npm run dev        # /api 自动代理到 http://localhost:8000
 ```
 
-> 完整环境依赖见 `requirements.txt`（Demo 用 4 包）和 `CLAUDE.md`（开发用全量依赖）。
-
-## 数据来源与许可
-
-原始数据来自 UCI Machine Learning Repository：
-- **名称**: Condition monitoring of hydraulic systems
-- **DOI**: [10.24432/C5CW21](https://doi.org/10.24432/C5CW21)
-- **许可**: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **引用**: Helwig, N., Pignanelli, E., & Schütze, A. (2018). Condition monitoring of hydraulic systems [Dataset]. UCI Machine Learning Repository.
-
-因原始数据文件超过 GitHub 100 MB 限制，`dataset/` 不入仓库。Demo 使用预计算数据包 `app_data/demo_windows.npz`，无需下载原始数据。
+接口：`GET /api/health`（健康检查）、`POST /api/ask`（SSE 流式问答）。
 
 ## 目录结构
 
-```
+```text
 .
-├── app.py                   Streamlit 交互 Demo
-├── app_data/                预计算 Chronos 预测结果（1680 窗口）
-├── data/                    秒级对齐张量 tensor_31ch_60steps.npz
-├── dataset/                 原始 UCI 数据（不入仓库）
-├── docs/                    过程记录与演示脚本
-├── hydraulic_cleaning/      探索性分析 Notebook（8 个）
-├── knowledge/               知识库 12 条排查条目（Markdown）
-├── models/                  bge-small-zh-v1.5 嵌入模型（不入仓库）
-├── output/                  LangGraph 运行工单与 State 快照
-├── rag_store/               Chroma 向量库持久化（不入仓库）
-├── reports/                 实验报告图表与 split_comparison.csv
-├── src/                     核心代码
-│   ├── agent_graph.py       LangGraph 三节点闭环
-│   ├── build_rag.py         Chroma 向量库构建
-│   ├── llm_config.py        LLM 后端（DeepSeek）
-│   ├── query_rag.py         检索 + 拒答 + 严重度硬过滤
-│   └── severity_map.py      确定性严重度分级
-├── tests/                   test_knowledge.py + test_verifier.py
-├── CLAUDE.md                项目施工手册
-├── README.md                本文件
-└── requirements.txt         运行 Demo 所需依赖
+├── configs/config.yaml        # 所有路径与参数（脚本内禁止硬编码）
+├── data/
+│   ├── raw_pdf/               # 4 份手册 PDF（1.pdf–4.pdf）
+│   ├── parsed_md/             # MinerU 解析产物（blocks.jsonl + 每本一目录）
+│   └── chunks/                # chunks.jsonl + bm25_index.pkl
+├── chroma_db/                 # Chroma 持久化向量库（equipment_manual，457 条）
+├── models/                    # bge-small-zh-v1.5 / bge-reranker-base（不入仓库）
+├── eval/
+│   ├── qa_set.jsonl           # 36 题评测集
+│   └── reports/               # s3_baseline / s3_hybrid / s3_rerank / s3_summary
+├── src/
+│   ├── s1_ingest/             # MinerU 解析 → 结构化 → 质检
+│   ├── s2_index/              # 清洗 → 合并 chunk → 向量化
+│   ├── s3_eval/               # 评测集 + 混合检索 + rerank
+│   ├── s4_agent/              # LangGraph 编排 + 引用校验
+│   ├── s5_app/                # FastAPI 后端（SSE）
+│   └── llm_config.py          # DeepSeek 配置
+├── frontend/                  # Vite + React + TS + Tailwind 前端
+├── docs/process_log.md        # 过程失败日志
+├── CLAUDE.md                  # 项目施工手册
+└── requirements.txt
 ```
 
-## 局限与下一步
+## 数据来源
 
-- **Pump 与 Accumulator** 未做偏离检出。阶段二仅覆盖 cooler 与 valve，pump 无对应通道、accumulator 无物理传感器可直接监测预充压力。
-- **分制度阈值标定**：当前 τ_level / τ_shape 对所有 cooler 档位共用一对阈值。按严重度分级建立独立阈值（轻度/中度/严重各一对 τ）是下一步的改进方向。
-- **多组件联合诊断**：当前 LangGraph 闭环一次只诊断一个组件，系统级故障（如 system-01 排查流程）未接入自动化路径。
-- **留出验证覆盖率**：τ_retrieval 留出验证 4/6 通过，2 例漏网均为语义邻近导致的向量近似。进一步扩大负样本集并标定多级阈值是改进方向。
+语料为 4 份公开可获取的泵类设备厂商手册（doc 1–4）：
+
+1. D型/MD型/DF型卧式多级离心泵安装使用说明书
+2. Wilo—WR 系列多级离心泵
+3. Leader 离心泵（Ecotronic / Ecojet / Ecoplus 系列）
+4. Model 3700, API Type OH2 / ISO 13709 安装、运行与维护手册
+
+**仅用于开发环境的检索/生成能力验证**，不用于生产或商业用途。embedding 与 LLM 模型均本地离线加载（`local_files_only=True`），运行时不联网下载。

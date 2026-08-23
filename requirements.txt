@@ -1,9 +1,28 @@
+# =====================================================================
+# ⚠️ 依赖冲突说明（重要）
+# S1 与 S2+ 对 transformers 版本要求互斥：
+#   - mineru[pipeline] 要求 transformers<5.0.0
+#   - sentence-transformers>=6.0.0 要求 transformers>=5.0.0
+# 当前环境为 transformers 5.15.1，S2+ 可正常运行。
+# 若需重跑 S1 解析新 PDF，
+# 先 pip install "transformers<5.0.0"，跑完再升回。
+# =====================================================================
+
 # ---- S0 遗留（原 Demo 用，兼容保留）----
 streamlit
 plotly
 numpy
 pandas
 
-# ---- S1 语料解析：MinerU pipeline 后端（CPU）----
-# 安装方式：先 `python -m venv .venv`，再 `pip install -r requirements.txt`
-mineru[pipeline]>=3.4.0
+# ---- S1 语料解析（一次性，已完成）----
+mineru[pipeline]>=3.4.0   # 约束 transformers<5.0.0
+six                        # mineru 3.4.5 打包漏声明，pytorchocr 内部 import six，不装运行时报 ModuleNotFoundError
+
+# ---- S2 及以后：检索与 Agent ----
+sentence-transformers>=6.0.0   # 要求 transformers>=5.0.0
+chromadb
+
+# ---- S5 应用后端 ----
+fastapi
+uvicorn
+sse-starlette

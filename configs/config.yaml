@@ -20,3 +20,70 @@ s1_ingest:
     header_footer_max_occurrence: 0.5   # 某行文本出现页数占比 >= 该阈值 -> 判定为页眉/页脚
     min_block_chars: 10                  # 正文块最小字数（小于则视为噪音，任务三列入空/短块）
     max_block_chars: 2000                # 正文块最大字数（超过则列为超长 block）
+
+s2_clean:
+  # 输入输出（S2 任务一：只清洗不合并、不切分）
+  input_jsonl: data/parsed_md/blocks.jsonl      # 输入：S1 产物
+  output_jsonl: data/chunks/blocks_clean.jsonl  # 输出：干净块
+
+  # 清洗规则参数（规则按下方 1~6 顺序执行，命中即删除/清洗，不再进入后续规则）
+  #   1 drop_empty          text/table_html/img_path 三者皆空 -> 删
+  #   2 strip_control       剔除 \x00 等不可见字符；剔后为空 -> 删，否则保留清洗文本
+  #   3 drop_toc            单块内 "." 或 "…" 出现 >= toc_dot_min 次 -> 删
+  #   4 drop_pure_symbol    去掉标点空白后无中英文数字 -> 删
+  #   5 drop_empty_table    table_html 空且无 img_path 的 table 块 -> 删
+  #   6 keep_short          过短块（char_len < min_block_chars）保留，不删
+  toc_dot_min: 20                 # 目录页判定阈值
+  min_block_chars: 10             # 过短块保留阈值（任务二合并）
+
+s2_chunk:
+  # 输入输出（S2 任务二：合并碎块成 chunk，只合并不向量化）
+  input_jsonl: data/chunks/blocks_clean.jsonl
+  output_jsonl: data/chunks/chunks.jsonl
+  target_chars: 400                # 累计 char_len 达到即封一个 chunk
+  max_chars: 800                   # 超过强制封块
+  overlap_blocks: 1                # 相邻 chunk 重叠的源块数
+  min_body_chars: 30               # 修正2：正文(去前缀)char_len < 该值 -> 丢弃 chunk
+  contact_hits_min: 2              # 修正4：正文同时命中 >= 该数目的联系方式特征 -> 丢弃 chunk
+
+s2_vector:
+  # 输入输出（S2 任务三：embedding + Chroma 向量库）
+  input_jsonl: data/chunks/chunks.jsonl
+  chroma_dir: chroma_db/                 # Chroma 持久化目录
+  collection_name: equipment_manual      # collection 名
+  model_path: models/bge-small-zh-v1.5   # 本地 embedding 模型
+  device: cpu                            # 推理设备
+  normalize_embeddings: true             # 向量归一化
+  batch_size: 32                         # 批量入库大小
+
+s3_retrieval:
+  # 【最终采用方案】BM25 + 向量混合检索（RRF 融合），S3 实测结论见 eval/reports/s3_summary.md
+  qa_set: eval/qa_set.jsonl
+  bm25_index: data/chunks/bm25_index.pkl   # BM25 索引缓存
+  report: eval/reports/s3_hybrid.md
+  top_k: 10               # 最终输出 top_k
+  per_path_top: 20        # 两路各取 top_20 再融合
+  rrf_k: 60               # RRF 融合常数 k
+
+s3_rerank:
+  # 输入输出（S3 任务五：混合召回 + CrossEncoder 精排，三方对比）
+  qa_set: eval/qa_set.jsonl
+  report: eval/reports/s3_rerank.md
+  rerank_model: models/bge-reranker-base   # 本地 rerank 模型
+  batch_size: 16           # CrossEncoder 打分 batch
+  top_k: 10                # 精排后输出 top_k
+  per_path_top: 20         # 混合召回 top_20
+  rrf_k: 60                # RRF 融合常数 k
+  # 弃用原因：
+  #   实测 rerank 提升 hard/table 的 R@10（+0.20/+0.14），
+  #   但总体 R@1 从 0.778 跌至 0.639，7 条原本排第 1 的正文题被降权；
+  #   且单题多耗 3.07s。
+  #   本项目语料 text 占多数，全局 rerank 净亏，故弃用。
+  #   模型与脚本保留，可随时置 true 复现。
+  enabled: false
+
+s4_agent:
+  # 拒答闸一：向量 top-1 cosine distance 阈值（> 判为知识库无相关内容）
+  # 标定：36 条正样本 distance 的 P95 = 0.3567；6 条负样本 min = 0.3347（挖掘机液压泵，语义相邻）。
+  # 两者重叠（无清晰间隔），按规则取正样本 P95。
+  tau_distance: 0.3567
