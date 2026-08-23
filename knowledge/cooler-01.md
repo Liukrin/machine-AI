@@ -1,12 +1,12 @@
 ---
 id: cooler-01
 component: 冷却器
-severity: 严重
+severity: 中度
 source: UCI Condition Monitoring of Hydraulic Systems dataset, documentation.txt (CC BY 4.0, doi:10.24432/C5CW21)
 ---
 
 ## 现象
-冷却效率 CE 下降至正常水平的 20%，冷却功率 CP 同步下降。TS1–TS4 四个温度传感器读数整体偏高，其中 TS2 通道较健康态（cooler=100）升高约 18.6°C（本项目阶段一实测）。系统回油温度上升，油液黏度下降，可能导致后续泵泄漏量增大。
+冷却效率 CE 下降至正常水平的 20%，冷却功率 CP 同步下降。TS1–TS4 四个温度传感器读数整体偏高，其中 TS2 通道较健康态（cooler=100）升高约 8.0°C（本项目阶段二实测）。系统回油温度上升，油液黏度下降，可能导致后续泵泄漏量增大。
 
 ## 可能原因
 1. 冷却器换热管束部分堵塞或结垢，换热面积减少

@@ -1,0 +1,24 @@
+{
+  "window_id": -1,
+  "component": "齿轮箱",
+  "alert_level": "danger",
+  "s_level": 15.0,
+  "s_shape": 0.5,
+  "X_valve": 73,
+  "X_pump": 0,
+  "X_accum": 90,
+  "cooler_target": 3,
+  "verdict_original": "synthetic",
+  "retrieval_hit": false,
+  "retrieved": [],
+  "retrieved_texts": [],
+  "retrieval_score": null,
+  "diagnosis_raw": "",
+  "work_order_md": "## 诊断结论\n\n知识库无对应条目，需人工介入。",
+  "work_order_json": "{\"conclusion\": \"知识库无对应条目，需人工介入\"}",
+  "verification": {
+    "checked": false,
+    "reason": "retrieval rejected"
+  },
+  "status": "rejected"
+}

@@ -1,0 +1,21 @@
+{
+  "window_id": 20,
+  "component": "冷却器",
+  "alert_level": "normal",
+  "s_level": 0.0013158161891624331,
+  "s_shape": 0.5088279247283936,
+  "X_valve": 73,
+  "X_pump": 0,
+  "X_accum": 90,
+  "cooler_target": 100,
+  "verdict_original": "normal",
+  "retrieval_hit": false,
+  "retrieved": [],
+  "retrieved_texts": [],
+  "retrieval_score": null,
+  "diagnosis_raw": "",
+  "work_order_md": "",
+  "work_order_json": "",
+  "verification": {},
+  "status": "completed"
+}

@@ -1,0 +1,21 @@
+{
+  "window_id": -1,
+  "component": "齿轮箱",
+  "alert_level": "normal",
+  "s_level": 0.34648099541664124,
+  "s_shape": 0.8397440910339355,
+  "X_valve": 100,
+  "X_pump": 2,
+  "X_accum": 130,
+  "cooler_target": 100,
+  "verdict_original": "normal",
+  "retrieval_hit": false,
+  "retrieved": [],
+  "retrieved_texts": [],
+  "retrieval_score": null,
+  "diagnosis_raw": "",
+  "work_order_md": "",
+  "work_order_json": "",
+  "verification": {},
+  "status": "completed"
+}
