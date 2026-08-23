@@ -39,7 +39,7 @@ flowchart LR
 环境要求：Python 3.11+（依赖见 [requirements.txt](requirements.txt)）、Node 18+。
 
 ```bash
-# 1. 配置 LLM key（.env 填 DEEPSEEK_API_KEY=sk-...）
+# 1. 配置 LLM key：复制 .env.example 为 .env 并填入 key
 
 # 2. 后端（FastAPI + SSE，端口 8000）
 python -m uvicorn src.s5_app.api:app --host 127.0.0.1 --port 8000
