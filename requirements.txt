@@ -1,4 +1,9 @@
+# ---- S0 遗留（原 Demo 用，兼容保留）----
 streamlit
 plotly
 numpy
 pandas
+
+# ---- S1 语料解析：MinerU pipeline 后端（CPU）----
+# 安装方式：先 `python -m venv .venv`，再 `pip install -r requirements.txt`
+mineru[pipeline]>=3.4.0

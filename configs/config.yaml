@@ -1,0 +1,22 @@
+# 机械设备运维知识问答 RAG + Agent —— S1 语料解析配置
+# 所有路径一律从本文件读取，脚本内不得硬编码。
+
+s1_ingest:
+  # MinerU 参数（pipeline 后端，CPU）
+  mineru:
+    backend: pipeline          # pipeline（CPU 友好）| vlm
+    device: cpu                # 推理设备
+    # 首次运行自动下载模型，下载目录由 MinerU 决定（见 --models 说明）
+    language: zh
+
+  # 路径
+  raw_pdf_dir: data/raw_pdf        # 输入：待解析 PDF 目录
+  parsed_md_dir: data/parsed_md    # 输出：每本 PDF 一个子目录（{文件名}/）
+  blocks_jsonl: data/parsed_md/blocks.jsonl   # 任务二结构化输出
+  qc_report_md: eval/reports/s1_qc.md         # 任务三质检报告
+
+  # 后处理规则
+  postprocess:
+    header_footer_max_occurrence: 0.5   # 某行文本出现页数占比 >= 该阈值 -> 判定为页眉/页脚
+    min_block_chars: 10                  # 正文块最小字数（小于则视为噪音，任务三列入空/短块）
+    max_block_chars: 2000                # 正文块最大字数（超过则列为超长 block）
