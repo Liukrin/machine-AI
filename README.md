@@ -105,5 +105,4 @@ npm run dev        # /api 自动代理到 http://localhost:8000
 
 - [docs/process_log.md](docs/process_log.md)（开发过程与失败记录）
 - [docs/badcase.md](docs/badcase.md)（已知缺陷与边界分析）
-- [docs/resume_bullets.md](docs/resume_bullets.md)（简历描述条目）
 - [eval/reports/s3_summary.md](eval/reports/s3_summary.md)（检索评测总结）

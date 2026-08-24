@@ -11,3 +11,4 @@ rag_store/
 models/
 *.pkl
 requirements.lock.txt
+docs/resume_bullets.md
