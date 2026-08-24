@@ -4,6 +4,16 @@
 
 > 本仓库由早期的液压系统时序预测性维护项目演化而来（阶段一～五记录于 [docs/process_log.md](docs/process_log.md)），当前主线为 S1–S5 的手册 RAG 管线。
 
+## 使用场景
+
+现场维修人员遇到设备故障时，通常要翻几百页 PDF 手册才能找到某个参数或处置步骤；本系统把这个过程变成一次提问。
+
+- 「防爆泵安装需遵守哪些指导原则？」→ 返回正文段落
+- 「出水管径125时轴封水量是多少？」→ 返回表格
+- 「挖掘机液压泵压力多少正常？」→ 拒答（超出已导入手册范围）
+
+知识库只覆盖已导入的 4 份手册，超出范围会显式拒答而不是猜测。
+
 ## 架构
 
 ```mermaid
@@ -90,3 +100,10 @@ npm run dev        # /api 自动代理到 http://localhost:8000
 4. Model 3700, API Type OH2 / ISO 13709 安装、运行与维护手册
 
 **仅用于开发环境的检索/生成能力验证**，不用于生产或商业用途。embedding 与 LLM 模型均本地离线加载（`local_files_only=True`），运行时不联网下载。
+
+## 文档索引
+
+- [docs/process_log.md](docs/process_log.md)（开发过程与失败记录）
+- [docs/badcase.md](docs/badcase.md)（已知缺陷与边界分析）
+- [docs/resume_bullets.md](docs/resume_bullets.md)（简历描述条目）
+- [eval/reports/s3_summary.md](eval/reports/s3_summary.md)（检索评测总结）
