@@ -6,6 +6,7 @@ chroma_db/
 mlruns/
 .venv/
 .env
+.idea/
 dataset/
 rag_store/
 models/
