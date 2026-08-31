@@ -1,6 +1,6 @@
 # 已知缺陷与边界（bad case 分析）
 
-本文档整理开发过程中定位过的失败案例，记录已知缺陷与系统边界，不是待办清单。已修复或处置：切句 bug、SSE 行尾、gold 跨块、全局 rerank；未修复的结构性局限：数字密集表检索、拒答阈值重叠。
+本文档整理开发过程中定位过的失败案例，记录已知缺陷与系统边界，不是待办清单。已修复或处置：切句 bug、SSE 行尾、gold 跨块、全局 rerank；未修复的结构性局限：数字密集表检索、拒答阈值重叠；未清理（如实记录）：知识库混入自造样例数据。
 
 ## 案例
 
@@ -75,6 +75,18 @@
 | 残留风险 | 无（已兼容全部行尾），但提示接入第三方 SSE 源仍需按规范处理 |
 
 > 出处：docs/process_log.md
+
+### 7. 知识库混入自造样例数据
+
+| 字段 | 内容 |
+|---|---|
+| 现象 | chunks.jsonl 与 Chroma（equipment_manual）均为 457 条，其中 18 条 doc_id 为 sample_* 的自造样例，可被检索与引用 |
+| 定位过程 | 按 doc_id 统计分布，发现 sample_cooler_manual 9 / sample_pump_manual 5 / sample_valve_manual 4，且 Chroma 中 id 前缀分布与 chunks.jsonl 完全一致 |
+| 根因 | S1 阶段为打通解析流程生成的样例 PDF 未在建库前剔除 |
+| 处置 | 未清理。评测集 36 题全部抽自真实手册，指标不受影响；清理需重建 Chroma 与 BM25 并重跑三方评测，成本高于收益，如实记录 |
+| 残留风险 | 真实提问若命中 sample chunk，会引用到虚构内容 |
+
+> 出处：data/chunks/chunks.jsonl、chroma_db
 
 ## 已知结构性局限
 

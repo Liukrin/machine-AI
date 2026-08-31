@@ -12,13 +12,13 @@
 - 「出水管径125时轴封水量是多少？」→ 返回表格
 - 「挖掘机液压泵压力多少正常？」→ 拒答（超出已导入手册范围）
 
-知识库只覆盖已导入的 4 份手册，超出范围会显式拒答而不是猜测。
+知识库覆盖 7 个文档：4 份公开泵类手册 + 3 份自造样例手册（见「数据来源」），超出范围会显式拒答而不是猜测。
 
 ## 架构
 
 ```mermaid
 flowchart LR
-    A["S1 解析<br/>MinerU 解析 4 份 PDF<br/>→ blocks.jsonl"] --> B["S2 切分 + 索引<br/>清洗合并 457 chunk<br/>bge-small-zh 向量 + Chroma<br/>BM25 索引"]
+    A["S1 解析<br/>MinerU 解析 7 份 PDF（4 真实 + 3 样例）<br/>→ blocks.jsonl"] --> B["S2 切分 + 索引<br/>清洗合并 457 chunk<br/>bge-small-zh 向量 + Chroma<br/>BM25 索引"]
     B --> C["S3 混合检索<br/>BM25 + 向量 RRF 融合<br/>top_k=10"]
     C --> D["S4 Agent 编排<br/>LangGraph 四节点<br/>retrieve→generate→verify→format<br/>拒答闸 + 引用校验"]
     D --> E["S5 前后端<br/>FastAPI SSE 流式<br/>Vite + React 前端"]
@@ -26,8 +26,8 @@ flowchart LR
 
 ## 核心数据
 
-- **语料**：4 份手册 → 457 个 chunk（text 328 / table 129）
-- **评测集**：36 题（easy 14 / medium 17 / hard 5；text 29 / table 7）
+- **语料**：7 个文档 → 457 个 chunk（text 328 / table 129）：4 份公开泵类手册（439 条）+ 3 份自造样例手册（18 条，S1 阶段用于打通解析流程后保留在库）
+- **评测集**：36 题（easy 14 / medium 17 / hard 5；text 29 / table 7），全部抽自真实手册 doc 1–4，不含 sample，故检索指标不受样例数据影响
 - **三轮检索对比**（36 题，top_k=10，最终采用混合检索）：
 
 | 指标 | 基线（纯向量） | 混合（BM25+向量） | 混合 + rerank | 最终采用 |
@@ -69,7 +69,7 @@ npm run dev        # /api 自动代理到 http://localhost:8000
 .
 ├── configs/config.yaml        # 所有路径与参数（脚本内禁止硬编码）
 ├── data/
-│   ├── raw_pdf/               # 4 份手册 PDF（1.pdf–4.pdf）
+│   ├── raw_pdf/               # 7 份 PDF：4 份真实手册（1.pdf–4.pdf）+ 3 份自造样例（sample_*）
 │   ├── parsed_md/             # MinerU 解析产物（blocks.jsonl + 每本一目录）
 │   └── chunks/                # chunks.jsonl + bm25_index.pkl
 ├── chroma_db/                 # Chroma 持久化向量库（equipment_manual，457 条）
@@ -92,12 +92,14 @@ npm run dev        # /api 自动代理到 http://localhost:8000
 
 ## 数据来源
 
-语料为 4 份公开可获取的泵类设备厂商手册（doc 1–4）：
+语料为 4 份公开可获取的泵类设备厂商手册（doc 1–4），另有 3 份自造样例手册（见清单后说明）：
 
 1. D型/MD型/DF型卧式多级离心泵安装使用说明书
 2. Wilo—WR 系列多级离心泵
 3. Leader 离心泵（Ecotronic / Ecojet / Ecoplus 系列）
 4. Model 3700, API Type OH2 / ISO 13709 安装、运行与维护手册
+
+另有 3 份自造样例手册：sample_cooler_manual / sample_pump_manual / sample_valve_manual，由 [src/s1_ingest/_make_sample_pdfs.py](src/s1_ingest/_make_sample_pdfs.py) 生成，内容为虚构示例，S1 阶段用于打通解析流程，建库时未剔除，同样已入库可被检索（18 条 chunk，详见 [docs/badcase.md](docs/badcase.md) 案例 7）。
 
 **仅用于开发环境的检索/生成能力验证**，不用于生产或商业用途。embedding 与 LLM 模型均本地离线加载（`local_files_only=True`），运行时不联网下载。
 
