@@ -36,6 +36,8 @@ flowchart LR
 | Recall@10 | 0.944 | 0.944 | 0.972 | 混合 |
 | MRR@10 | 0.720 | **0.836** | 0.765 | 混合 |
 
+- **端到端性能**（[s5_perf 实测](eval/reports/s5_perf.md)）：LLM 生成占端到端 98.1%（均值 2600.5 / 2651.8ms），拒答路径均值 61.5ms，较正常路径每题省 2590ms
+
 ## 关键取舍
 
 1. **混合检索采用**。BM25 + 向量 RRF 融合：总体 R@1 0.583→0.778（+0.194）、MRR@10 0.720→0.836，table 的 R@1 0.143→0.429（翻三倍）。BM25 的字面匹配补上「问题 → 精确片段 / 表头 / 数字」的信号。
@@ -108,3 +110,4 @@ npm run dev        # /api 自动代理到 http://localhost:8000
 - [docs/process_log.md](docs/process_log.md)（开发过程与失败记录）
 - [docs/badcase.md](docs/badcase.md)（已知缺陷与边界分析）
 - [eval/reports/s3_summary.md](eval/reports/s3_summary.md)（检索评测总结）
+- [eval/reports/s5_perf.md](eval/reports/s5_perf.md)（端到端性能与 Token 成本评测）
