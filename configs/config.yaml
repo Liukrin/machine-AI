@@ -87,3 +87,19 @@ s4_agent:
   # 标定：36 条正样本 distance 的 P95 = 0.3567；6 条负样本 min = 0.3347（挖掘机液压泵，语义相邻）。
   # 两者重叠（无清晰间隔），按规则取正样本 P95。
   tau_distance: 0.3567
+
+s5_perf:
+  # 端到端性能与 Token 成本评测（src/s5_eval/perf_bench.py）
+  # 直连 graph 节点函数与 llm.stream，不起 HTTP 服务。
+  qa_set: eval/qa_set.jsonl            # 复用检索评测同一套题（36 题，全部来自真实手册）
+  report: eval/reports/s5_perf.md      # 输出报告（分段耗时 / 端到端 / token / 占比四张表）
+  warmup_runs: 1                       # 预热次数（走完整正常路径，结果丢弃，排除 _load_ctx/jieba/连接冷启动）
+  repeat: 1                            # 每题重复计时次数（>1 时统计合并所有轮次）
+  max_tokens: 500                      # 生成上限，与 api.py / graph.py 现行值一致（只读不改生产代码）
+  encode_measure_runs: 30              # 单次 model.encode(单句) 耗时测量次数，取中位数（量化重复编码冗余）
+  # 拒答路径专用库外问题（占位 3 条，需与知识库语义足够远才能触发拒答闸）；
+  # 若实测 distance ≤ tau 走了生成路径，bench 如实记录实际路径，不强制拒答。
+  reject_questions:
+    - 明天北京天气怎么样            # 占位：与泵手册语义无关，可按需替换
+    - 如何做红烧肉                  # 占位：同上
+    - 股票基金怎么选                # 占位：同上
