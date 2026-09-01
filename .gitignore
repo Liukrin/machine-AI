@@ -13,3 +13,5 @@ models/
 *.pkl
 requirements.lock.txt
 docs/resume_bullets.md
+# 307KB 检索缓存，本地可重建（--rebuild-cache），不入库
+eval/halluc_ab/retrieval_cache.jsonl

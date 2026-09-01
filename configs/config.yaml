@@ -103,3 +103,59 @@ s5_perf:
     - 明天北京天气怎么样            # 占位：与泵手册语义无关，可按需替换
     - 如何做红烧肉                  # 占位：同上
     - 股票基金怎么选                # 占位：同上
+
+# ---------------------------------------------------------------------------
+# S4 补充实验：幻觉抑制模块对照评测（src/s4_eval/halluc_ab_eval.py）
+#   目标：量化「强约束提示词 + verify 节点」的效果，产出无引用句占比、虚构文档检出条数。
+#   设计：36 题各跑一次检索并落盘缓存，A/B/C 各组读同一份缓存，只换系统提示词；
+#        temperature 固定，各组共用，杜绝检索与解码带来的额外变量。
+#   本段只被实验脚本读取，不改任何线上默认值（B 组直接用 graph.SYSTEM_PROMPT）。
+# ---------------------------------------------------------------------------
+s4_halluc_ab:
+  # 输入输出
+  qa_set: eval/qa_set.jsonl
+  retrieval_cache: eval/halluc_ab/retrieval_cache.jsonl   # 检索缓存（跑一次，两组共享）
+  retrieval_meta: eval/halluc_ab/retrieval_cache.meta.json # 缓存指纹，参数变了会显式报错
+  answers_raw: eval/halluc_ab/answers_raw.jsonl           # 逐题原始答案落盘，便于离线复算指标
+  detail_csv: eval/halluc_ab/details.csv                  # 明细：一行一题一组
+  summary_md: eval/halluc_ab/summary.md                   # 汇总表落盘（同时打印 stdout）
+
+  # A 组（对照）弱约束提示词：线上 SYSTEM_PROMPT 删掉第 2 条「答案末尾必须标注引用的
+  # chunk_id」，其余行原文照抄（保留 1/3/4 原编号，不重编号，以免改动「其余部分」的文字）。
+  # B 组不另存副本，运行时直接 import graph.SYSTEM_PROMPT，避免与线上漂移。
+  prompt_weak_file: configs/prompt_weak_ab.txt
+  citation_drop_pattern: "必须标注引用"   # 漂移自检：A 组必须恰好少这一行
+  citation_drop_lines: 1                 # 预期被删除的行数
+
+  # C 组（逐句标注变体）：线上 SYSTEM_PROMPT 仅把引用条款替换为「每一句末尾标注」，
+  # 其余行原文照抄；用于消除「答案末尾标注」与逐句评测口径的错配（B 组残值的主因）。
+  prompt_per_sentence_file: configs/prompt_per_sentence_c.txt
+  per_sentence_marker: 每一句  # 漂移自检：C 组唯一改动行必须包含该词
+
+  # 默认参与组别；磁盘上已完整落盘且提示词哈希一致的组自动复用，不重复调用 LLM
+  groups: [A, B, C]
+
+  # 生成参数（与生产现行值一致，只读不改生产代码）
+  top_k: 5            # 同 graph.retrieve
+  max_tokens: 500     # 同 graph.generate
+  temperature: 0.0    # 确定性解码；脚本从本文件读取，不硬编码
+  llm_retries: 2      # 单题 LLM 调用失败后的显式重试次数；耗尽即记失败，绝不当成功统计
+  retry_sleep: 3.0    # 重试间隔（秒）
+
+  # 指标定义 1：实质性句子判定
+  min_sentence_chars: 10               # 切分后长度 < 该值的片段剔除
+  transition_end_markers: ["：", ":"]  # 以冒号结尾的纯过渡/小标题句剔除
+  transition_markers:                  # 命中下列说法且整句很短 -> 判为纯过渡句剔除
+    - 以下是相关信息
+    - 以下是检索到的
+    - 相关内容如下
+    - 回答如下
+  transition_max_chars: 25             # 过渡句判定的长度上限（避免误删实义句）
+
+  # 拒答判定（控制变量）：拒答闸命中（两组必然相同）+ 模型自述拒答（两组可能不同）
+  refusal_markers:
+    - 检索内容不足
+    - 知识库无相关内容
+    - 无法回答
+    - 未能找到相关
+  refusal_max_chars: 40   # 整句/整答去空白后长度 <= 该值且命中拒答话术 -> 判为模型自述拒答
