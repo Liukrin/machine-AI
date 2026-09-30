@@ -1,12 +1,14 @@
 """S5 任务一：FastAPI 后端。
 
-复用 S4 graph.py 的节点函数与拒答阈值（retrieve / verify_node / TAU_DISTANCE /
-SYSTEM_PROMPT），不复制其检索与校验逻辑；仅 LLM 生成部分改为 stream=True 逐块
-转发，以满足 SSE 的 token 事件。
+复用 S4 graph.py 的节点函数与线上参数（retrieve / verify_node / SYSTEM_PROMPT /
+MAX_TOKENS / TAU_DISTANCE，均来自 configs/config.yaml），不复制其检索与校验逻辑；
+仅 LLM 生成部分改为 stream=True 逐块转发，以满足 SSE 的 token 事件。done 事件带上
+finish_reason，值为 "length" 时表示回答被 max_tokens 截断，前端据此提示。
 
 接口：
-    GET  /api/health   健康检查
-    POST /api/ask      SSE 流式问答
+    GET  /api/health             健康检查（含知识库文档清单）
+    POST /api/ask                SSE 流式问答
+    GET  /api/chunks/{chunk_id}  单个 chunk 完整内容（前端来源详情按需拉取）
 
 用法：
     python src/s5_app/api.py     # 默认 127.0.0.1:8000
@@ -16,6 +18,8 @@ from __future__ import annotations
 import json
 import sys
 import time
+from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -26,49 +30,99 @@ sys.path.insert(0, str(ROOT / "src" / "s3_eval"))
 
 import numpy as np  # noqa: E402
 import yaml  # noqa: E402
-from fastapi import FastAPI  # noqa: E402
+from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 from sse_starlette.sse import EventSourceResponse  # noqa: E402
 
 from langchain_core.messages import HumanMessage, SystemMessage  # noqa: E402
 from llm_config import LLM_CONFIG, get_llm  # noqa: E402
-from graph import SYSTEM_PROMPT, TAU_DISTANCE, retrieve, verify_node  # noqa: E402
+from graph import MAX_TOKENS, SYSTEM_PROMPT, TAU_DISTANCE, retrieve, verify_node  # noqa: E402
 from hybrid_retrieval import (  # noqa: E402
     _load_ctx,
     build_search_text,
     vector_top1_distance,
 )
 
-MAX_TOKENS = 500          # 与 graph.py generate 保持一致
 PREVIEW_CHARS = 100       # retrieval 事件里 preview 截断长度
 REJECT_REASON = "知识库无相关内容"
-
-app = FastAPI(title="设备运维知识问答 RAG API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 def _config() -> dict:
     return yaml.safe_load((ROOT / "configs" / "config.yaml").read_text(encoding="utf-8"))
 
 
-def _chunk_count() -> int:
-    """知识库 chunk 总数（与 Chroma 入库数量一致，读 chunks.jsonl 行数）。"""
+app = FastAPI(title="设备运维知识问答 RAG API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=(_config().get("s5_app") or {}).get("cors_origins") or [],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@lru_cache(maxsize=1)
+def _chunk_index() -> dict[str, dict]:
+    """chunk_id -> chunk（读 chunks.jsonl，与 Chroma 入库同源）。进程内缓存，重建索引后需重启服务。"""
     path = ROOT / _config()["s2_vector"]["input_jsonl"]
-    return sum(1 for line in path.open("r", encoding="utf-8") if line.strip())
+    with path.open("r", encoding="utf-8") as f:
+        chunks = [json.loads(line) for line in f if line.strip()]
+    return {c["chunk_id"]: c for c in chunks}
+
+
+@lru_cache(maxsize=1)
+def _documents() -> dict[str, dict]:
+    """文档展示信息（config s5_app.documents）。"""
+    return (_config().get("s5_app") or {}).get("documents") or {}
+
+
+def _doc_meta(doc_id: str) -> dict:
+    """文档展示名；未在 config 登记的 doc_id 直接显示 doc_id。"""
+    doc = _documents().get(doc_id) or {}
+    title = doc.get("title") or doc_id
+    return {"doc_title": title, "doc_short": doc.get("short") or title, "is_sample": bool(doc.get("sample"))}
+
+
+def _body_text(chunk: dict) -> str:
+    """text chunk 的正文：去掉建库时拼在开头的 heading_path 前缀（见 build_chunks.py）。"""
+    text = chunk.get("text") or ""
+    hp = chunk.get("heading_path")
+    prefix = f"{hp}\n\n" if hp else ""
+    return text[len(prefix):] if prefix and text.startswith(prefix) else text
+
+
+def _pages(chunk: dict) -> list[int] | None:
+    """page_range 是 MinerU 的 0 起页码，展示时转成 1 起。"""
+    pr = chunk.get("page_range") or []
+    if len(pr) != 2 or pr[0] is None or pr[1] is None:
+        return None
+    return [int(pr[0]) + 1, int(pr[1]) + 1]
 
 
 def _preview(chunk: dict) -> str:
-    """chunk 检索文本的前 PREVIEW_CHARS 字，作为前端预览。"""
-    text = " ".join(build_search_text(chunk).split())
+    """前端卡片预览：正文取去掉 heading 前缀后的内容，表格取单元格拼接文本，截断到 PREVIEW_CHARS 字。"""
+    if chunk.get("chunk_type") == "table":
+        text = build_search_text(chunk)
+        hp = chunk.get("heading_path")
+        if hp and text.startswith(hp):
+            text = text[len(hp):]
+    else:
+        text = _body_text(chunk)
+    text = " ".join(text.split())
     return text[:PREVIEW_CHARS] + ("…" if len(text) > PREVIEW_CHARS else "")
+
+
+def _chunk_meta(chunk: dict) -> dict:
+    return {
+        "chunk_id": chunk["chunk_id"],
+        "doc_id": chunk.get("doc_id"),
+        **_doc_meta(chunk.get("doc_id")),
+        "chunk_type": chunk.get("chunk_type"),
+        "heading_path": chunk.get("heading_path"),
+        "pages": _pages(chunk),
+    }
 
 
 def _chunk_distances(question: str, chunk_ids: list[str]) -> dict[str, float]:
@@ -83,14 +137,7 @@ def _chunk_distances(question: str, chunk_ids: list[str]) -> dict[str, float]:
 
 
 def _chunk_payload(chunk: dict, distance: float) -> dict:
-    return {
-        "chunk_id": chunk["chunk_id"],
-        "heading_path": chunk.get("heading_path"),
-        "doc_id": chunk.get("doc_id"),
-        "chunk_type": chunk.get("chunk_type"),
-        "distance": distance,
-        "preview": _preview(chunk),
-    }
+    return {**_chunk_meta(chunk), "distance": distance, "preview": _preview(chunk)}
 
 
 def _event(name: str, data: dict) -> dict:
@@ -125,10 +172,11 @@ def _sse_events(question: str):
         user = f"问题：{question}\n\n检索到的内容：\n{context}"
         messages = [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=user)]
 
-        llm = get_llm()
+        llm = get_llm(max_tokens=MAX_TOKENS)
         answer_parts: list[str] = []
         usage: dict = {}
-        for chunk in llm.stream(messages, max_tokens=MAX_TOKENS, stream_usage=True):
+        finish_reason = None  # "stop" 正常结束；"length" 被 max_tokens 截断
+        for chunk in llm.stream(messages, stream_usage=True):
             text = chunk.content or ""
             if text:
                 answer_parts.append(text)
@@ -136,6 +184,9 @@ def _sse_events(question: str):
             um = getattr(chunk, "usage_metadata", None)
             if um:
                 usage = um
+            fr = (getattr(chunk, "response_metadata", None) or {}).get("finish_reason")
+            if fr:
+                finish_reason = fr
         answer = "".join(answer_parts).strip()
 
         # 4. 引用校验（复用 graph.verify_node）
@@ -156,7 +207,13 @@ def _sse_events(question: str):
             total = (usage.get("input_tokens") or 0) + (usage.get("output_tokens") or 0)
         yield _event(
             "done",
-            {"total_tokens": total, "elapsed_ms": int((time.perf_counter() - t0) * 1000)},
+            {
+                "total_tokens": total,
+                "input_tokens": usage.get("input_tokens"),
+                "output_tokens": usage.get("output_tokens"),
+                "elapsed_ms": int((time.perf_counter() - t0) * 1000),
+                "finish_reason": finish_reason,
+            },
         )
     except Exception as exc:  # LLM 失败等一律显式推送，不静默
         yield _event("error", {"message": f"{type(exc).__name__}: {exc}"})
@@ -168,10 +225,28 @@ class AskRequest(BaseModel):
 
 @app.get("/api/health")
 def health() -> dict:
+    counts = Counter(c.get("doc_id") for c in _chunk_index().values())
+    docs = [{"doc_id": d, **_doc_meta(d), "chunk_count": n} for d, n in counts.items()]
+    docs.sort(key=lambda x: (x["is_sample"], x["doc_id"]))
     return {
         "status": "ok",
-        "chunk_count": _chunk_count(),
+        "chunk_count": sum(counts.values()),
         "model_name": LLM_CONFIG["model"],
+        "documents": docs,
+    }
+
+
+@app.get("/api/chunks/{chunk_id}")
+def chunk_detail(chunk_id: str) -> dict:
+    """单个 chunk 的完整内容：正文去掉 heading 前缀，表格返回 MinerU 原始 HTML（前端解析后渲染）。"""
+    chunk = _chunk_index().get(chunk_id)
+    if chunk is None:
+        raise HTTPException(status_code=404, detail=f"chunk 不存在：{chunk_id}")
+    is_table = chunk.get("chunk_type") == "table"
+    return {
+        **_chunk_meta(chunk),
+        "content": None if is_table else _body_text(chunk),
+        "table_html": chunk.get("table_html") if is_table else None,
     }
 
 

@@ -70,6 +70,12 @@ def tokenize(text: str) -> list[str]:
     return [t for t in jieba.lcut(text) if t.strip()]
 
 
+def build_bm25(chunks: list[dict]) -> tuple[BM25Okapi, list[str]]:
+    """对每个 chunk 的检索文本分词后建 BM25 索引（与查询侧 tokenize 同口径），返回 (索引, chunk_id 列表)。"""
+    tokenized = [tokenize(build_search_text(c)) for c in chunks]
+    return BM25Okapi(tokenized), [c["chunk_id"] for c in chunks]
+
+
 def compute_metrics(ranks: list[int | None]) -> tuple[dict, float, float | None]:
     n = len(ranks)
     recall = {k: sum(1 for r in ranks if r is not None and r <= k) / n for k in (1, 3, 5, 10)}
@@ -178,9 +184,7 @@ def main() -> None:
         bm25, bm25_ids = cache["bm25"], cache["chunk_ids"]
         print(f"已加载 BM25 缓存：{idx_path}")
     else:
-        tokenized = [tokenize(build_search_text(c)) for c in chunks]
-        bm25 = BM25Okapi(tokenized)
-        bm25_ids = [c["chunk_id"] for c in chunks]
+        bm25, bm25_ids = build_bm25(chunks)
         idx_path.parent.mkdir(parents=True, exist_ok=True)
         with idx_path.open("wb") as f:
             pickle.dump({"chunk_ids": bm25_ids, "bm25": bm25}, f)

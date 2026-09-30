@@ -1,0 +1,17 @@
+# =====================================================================
+# S1 PDF 解析环境（MinerU pipeline 后端，CPU）：只用于 src/s1_ingest/batch_parse.py
+# 需与应用环境（requirements.txt）分开：mineru[pipeline] 要求 transformers<5，
+# 而应用环境的 sentence-transformers 6 要求 transformers>=5。
+#
+# 现有解析产物由 MinerU 3.4.5 pipeline 后端生成（见 data/parsed_md/*/auto/*_middle.json 的 _version_name）；
+# 换 MinerU 版本或模型可能改变解析结果，进而改变 chunk_id，评测集的 gold_chunk_id 会失效。
+#
+# MinerU 模型需提前下载（MinerU 自带命令，模型目录记录在 ~/mineru.json）：
+#   mineru-models-download -s modelscope -m pipeline
+# =====================================================================
+
+mineru[pipeline]==3.4.5
+six==1.17.0      # mineru 3.4.5 漏声明：pytorchocr 内部 import six，不装运行时报 ModuleNotFoundError
+PyYAML==6.0.3    # batch_parse.py 读 configs/config.yaml
+
+# 另：src/s1_ingest/_make_sample_pdfs.py（生成 3 份自造样例 PDF）需要 matplotlib 与 SimHei 字体，只在复现样例手册时用到

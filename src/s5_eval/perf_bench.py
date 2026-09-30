@@ -13,8 +13,9 @@
 实测 distance 与 τ 对比（未触发拒答的占位题单列表格、排除出拒答统计）；
 单次 model.encode(单句) 耗时中位数（量化同题重复编码 3 次的冗余代价）。
 
-路径与参数一律读 configs/config.yaml 的 s5_perf 段；任何一题失败记录异常并
-继续，最后统计失败数，不静默吞掉。
+路径与参数一律读 configs/config.yaml 的 s5_perf 段；提示词版本与 max_tokens 取线上值
+（s4_agent 段，经 graph 导入），并写进报告头。任何一题失败记录异常并继续，最后统计
+失败数，不静默吞掉。
 
 用法：
     python src/s5_eval/perf_bench.py
@@ -25,6 +26,7 @@ import json
 import os
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -43,7 +45,7 @@ import yaml  # noqa: E402
 
 from langchain_core.messages import HumanMessage, SystemMessage  # noqa: E402
 from llm_config import LLM_CONFIG, get_llm  # noqa: E402
-from graph import SYSTEM_PROMPT, TAU_DISTANCE, retrieve, verify_node  # noqa: E402
+from graph import MAX_TOKENS, PROMPT_VERSION, SYSTEM_PROMPT, TAU_DISTANCE, retrieve, verify_node  # noqa: E402
 from hybrid_retrieval import _CTX, _load_ctx, build_search_text, vector_top1_distance  # noqa: E402
 from api import _chunk_distances  # noqa: E402
 
@@ -96,19 +98,21 @@ def run_once(question: str, max_tokens: int) -> dict:
         rec["input_tokens"] = None
         rec["output_tokens"] = None
         rec["total_tokens"] = None
+        rec["finish_reason"] = None
         rec["t_total"] = (time.perf_counter() - t_all0) * 1000
         return rec
 
     context = "\n\n".join(f"[{c['chunk_id']}]\n{build_search_text(c)}" for c in chunks)
     user = f"问题：{question}\n\n检索到的内容：\n{context}"
     messages = [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=user)]
-    llm = get_llm()
+    llm = get_llm(max_tokens=max_tokens)
 
     answer_parts: list[str] = []
     usage: dict = {}
+    finish_reason = None
     t_first = None
     t_req = time.perf_counter()
-    for chunk in llm.stream(messages, max_tokens=max_tokens, stream_usage=True):
+    for chunk in llm.stream(messages, stream_usage=True):
         text = chunk.content or ""
         if text:
             if t_first is None:
@@ -117,7 +121,11 @@ def run_once(question: str, max_tokens: int) -> dict:
         um = getattr(chunk, "usage_metadata", None)
         if um:
             usage = um
+        fr = (getattr(chunk, "response_metadata", None) or {}).get("finish_reason")
+        if fr:
+            finish_reason = fr
     t_end = time.perf_counter()
+    rec["finish_reason"] = finish_reason
 
     rec["t_ttft"] = (t_first - t_req) * 1000 if t_first is not None else None
     rec["t_generate"] = (t_end - t_req) * 1000
@@ -165,14 +173,15 @@ def stats_row(name: str, s: dict) -> str:
 def main() -> None:
     cfg = load_cfg()
     sp = cfg["s5_perf"]
-    max_tokens = int(sp["max_tokens"])
+    max_tokens = MAX_TOKENS
     warmup_runs = int(sp["warmup_runs"])
     repeat = int(sp["repeat"])
     encode_runs = int(sp["encode_measure_runs"])
 
     qa_set = [json.loads(line) for line in
               (ROOT / sp["qa_set"]).read_text(encoding="utf-8").splitlines() if line.strip()]
-    print(f"评测题数 {len(qa_set)}  warmup={warmup_runs}  repeat={repeat}  max_tokens={max_tokens}")
+    print(f"评测题数 {len(qa_set)}  warmup={warmup_runs}  repeat={repeat}  "
+          f"system_prompt={PROMPT_VERSION}  max_tokens={max_tokens}")
 
     # ---- 预热（排除 _load_ctx / jieba / 连接冷启动）----
     warmup(qa_set[0]["question"], warmup_runs, max_tokens)
@@ -260,7 +269,8 @@ def main() -> None:
     L = ["# S5 端到端性能与 Token 成本评测", ""]
     L.append(f"> 生成脚本：src/s5_eval/perf_bench.py（直连节点函数，不起 HTTP 服务）；"
              f"LLM：{LLM_CONFIG['model']}（{LLM_CONFIG['base_url']}）")
-    L.append(f"> 配置：warmup_runs={warmup_runs}  repeat={repeat}  max_tokens={max_tokens}  "
+    L.append(f"> 配置：warmup_runs={warmup_runs}  repeat={repeat}  system_prompt={PROMPT_VERSION}  "
+             f"max_tokens={max_tokens}  "
              f"τ={TAU_DISTANCE}；题数 {len(qa_set)} × repeat = {n_runs} 次，"
              f"成功 {len(records)}，失败 {len(failures)}")
     L.append("")
@@ -312,6 +322,10 @@ def main() -> None:
             L.append(f"| {gname} | {tk['n']} | {mname} | {p50} | {mean} | {mx} |")
     L.append(f"\n本次运行总消耗：total_tokens {sum(all_tokens)}"
              f"（input {sum(in_tokens)} + output {sum(out_tokens)}）。")
+    fr_counts = Counter(r.get("finish_reason") or "未返回" for r in normal)
+    truncated = [r["qa_id"] for r in normal if r.get("finish_reason") == "length"]
+    L.append("\n生成结束原因（finish_reason）：" + "，".join(f"{k} {v} 题" for k, v in sorted(fr_counts.items()))
+             + f"；length 表示被 max_tokens={max_tokens} 截断，截断题：{'、'.join(truncated) or '无'}。")
     L.append("\n> 单价随时变动，本报告只记 token 数量，不折算费用。\n")
 
     L.append("## 4. 耗时构成占比（按各阶段均值 / t_total 均值）\n")
@@ -382,7 +396,9 @@ def main() -> None:
     if tot_mean:
         print(f"拒答路径均值 {ms(rej_totals['mean'])} ms，每题省下 {ms(saving_mean)} ms")
     print(f"tokens：input 合计 {sum(in_tokens)}，output 合计 {sum(out_tokens)}，"
-          f"total 合计 {sum(all_tokens)}")
+          f"total 合计 {sum(all_tokens)}；output max {max(out_tokens) if out_tokens else '—'}")
+    print("finish_reason：" + "，".join(f"{k} {v}" for k, v in sorted(fr_counts.items()))
+          + f"；截断题：{'、'.join(truncated) or '无'}")
     print(f"报告已写入 {report}")
 
 

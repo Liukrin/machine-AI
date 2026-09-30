@@ -99,11 +99,8 @@ def main() -> None:
     print(f"chunk 数：{len(chunks)}")
     print(f"模型：{model_path}  device={device}  normalize={normalize}")
 
-    # 加载本地模型
-    try:
-        model = SentenceTransformer(str(model_path), device=device, local_files_only=True)
-    except TypeError:
-        model = SentenceTransformer(str(model_path), device=device)
+    # 加载本地模型（只读本地文件；加载失败直接报错，不退回联网下载）
+    model = SentenceTransformer(str(model_path), device=device, local_files_only=True)
 
     # 建库（已存在则删除重建）
     client = chromadb.PersistentClient(path=str(chroma_dir))
