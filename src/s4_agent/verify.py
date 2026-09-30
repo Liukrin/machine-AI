@@ -1,7 +1,7 @@
-"""S4 任务三：引用校验。从 src/agent_graph.py 的 verify_citation 适配而来。
+"""S4 任务三：引用校验。
 
-bigram 匹配逻辑沿用，参考文本改为本轮检索到的 chunk 的 text + table_html（剥标签）。
-新增：chunk_id 有效性（fabricated_citation）与无引用句检测。
+逐句做 bigram 重合检查，参考文本为本轮检索到的 chunk 的 text + table_html（剥标签）；
+同时检查 chunk_id 有效性（fabricated_citation）与无引用句。
 """
 from __future__ import annotations
 

@@ -1,7 +1,11 @@
-"""S4 任务一：LangGraph 三节点骨架（retrieve -> generate -> format）。
+"""S4：LangGraph 问答流水线 retrieve →（拒答闸）→ generate → verify → format。
 
-只求跑通，不加拒答、不加引用校验、不做多轮。检索复用 hybrid_retrieval 的
-hybrid_retrieve，LLM 复用 llm_config.get_llm。
+固定流水线，没有工具调用，也不做多轮。检索复用 hybrid_retrieval.hybrid_retrieve，
+LLM 复用 llm_config.get_llm，引用校验见 verify.py。系统提示词版本、top_k、
+max_tokens、拒答阈值都读 configs/config.yaml 的 prompts / s4_agent 段。
+
+线上 API（src/s5_app/api.py）复用本文件的节点函数与参数，但生成段改成了流式输出，
+没有直接执行编译后的图；本文件的 main() 是命令行入口。
 
 用法：
     python src/s4_agent/graph.py
@@ -24,13 +28,31 @@ from llm_config import get_llm  # noqa: E402
 from hybrid_retrieval import hybrid_retrieve, build_search_text, vector_top1_distance  # noqa: E402
 from verify import verify_citation  # noqa: E402
 
-SYSTEM_PROMPT = (
-    "你是设备维修手册问答助手。请严格依据检索到的内容回答。\n"
-    "1. 只根据检索到的内容回答，不得补充原文没有的信息；\n"
-    "2. 答案末尾必须标注引用的 chunk_id；\n"
-    "3. 若检索内容不足以回答，直接说「检索内容不足」；\n"
-    "4. 表格内容按原样呈现关键行，不要重述整张表。"
-)
+CONFIG_PATH = ROOT / "configs" / "config.yaml"
+
+
+def _load_config() -> dict:
+    return yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+
+
+def load_prompt(version: str, cfg: dict | None = None) -> str:
+    """读取某个版本（config prompts 段的 key）的系统提示词文件。
+
+    原样返回、不 strip：评测脚本按文件内容计算提示词哈希来判断能否复用已落盘的答案。
+    """
+    prompts = (cfg or _load_config())["prompts"]
+    if version not in prompts:
+        raise KeyError(f"未知的提示词版本 {version!r}，config prompts 段可选：{sorted(prompts)}")
+    return (ROOT / prompts[version]).read_text(encoding="utf-8")
+
+
+_CFG = _load_config()
+_AGENT_CFG = _CFG["s4_agent"]
+PROMPT_VERSION = str(_AGENT_CFG["system_prompt"])
+SYSTEM_PROMPT = load_prompt(PROMPT_VERSION, _CFG)
+TOP_K = int(_AGENT_CFG["top_k"])
+MAX_TOKENS = int(_AGENT_CFG["max_tokens"])
+TAU_DISTANCE = float(_AGENT_CFG["tau_distance"])
 
 
 class AgentState(TypedDict):
@@ -47,17 +69,9 @@ _raw_answer: str = ""
 _llm_calls: int = 0
 
 
-def _load_tau() -> float:
-    cfg = yaml.safe_load((ROOT / "configs" / "config.yaml").read_text(encoding="utf-8"))
-    return float(cfg["s4_agent"]["tau_distance"])
-
-
-TAU_DISTANCE = _load_tau()
-
-
 def retrieve(state: AgentState) -> dict:
-    """混合检索 top_5，chunk 的 text/table_html 随 chunk dict 一并入 state。"""
-    chunks, scores = hybrid_retrieve(state["question"], top_k=5)
+    """混合检索 top_k（config s4_agent.top_k），chunk 的 text/table_html 随 chunk dict 一并入 state。"""
+    chunks, scores = hybrid_retrieve(state["question"], top_k=TOP_K)
     return {"retrieved": chunks, "retrieval_scores": scores, "status": "retrieved"}
 
 
@@ -68,8 +82,8 @@ def generate(state: AgentState) -> dict:
         f"[{c['chunk_id']}]\n{build_search_text(c)}" for c in state["retrieved"]
     )
     user = f"问题：{state['question']}\n\n检索到的内容：\n{context}"
-    llm = get_llm()
-    msg = llm.invoke([SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=user)], max_tokens=500)
+    llm = get_llm(max_tokens=MAX_TOKENS)
+    msg = llm.invoke([SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=user)])
     answer = (msg.content or "").strip()
     _raw_answer = answer
 

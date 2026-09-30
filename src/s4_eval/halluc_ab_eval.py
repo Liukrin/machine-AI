@@ -1,11 +1,12 @@
-"""S4 补充实验：幻觉抑制模块对照评测（A 弱约束 / B 强约束线上版 / C 强约束+逐句标注）。
+"""S4 补充实验：引用标注对照评测（A 无引用要求 / B 末尾标注 / C 逐句标注）。
 
-只新增脚本，不改任何生产代码：
-  - B 组系统提示词直接 import graph.SYSTEM_PROMPT（线上原样，不另存副本）；
-  - A 组提示词读 configs/prompt_weak_ab.txt，内容是线上提示词删掉「答案末尾必须标注
-    引用的 chunk_id」这一条、其余行原文照抄，并在运行时做漂移自检；
-  - C 组提示词读 configs/prompt_per_sentence_c.txt，内容是线上提示词仅把引用条款替换为
-    「每一句末尾标注」，其余行原文照抄，同样在运行时做漂移自检；用于消除
+脚本名沿用早期「幻觉抑制」的叫法；指标「无引用句占比」衡量的是引用标注有没有覆盖到
+每一句，不衡量所引片段是否支持该句，也不衡量答案对错。
+
+三组提示词都读 configs/config.yaml prompts 段的文件（线上用的是其中一版，见
+s4_agent.system_prompt），以 B 组为基准做漂移自检：
+  - A 组 = B 组删掉「答案末尾必须标注引用的 chunk_id」这一条、其余行原文照抄；
+  - C 组 = B 组仅把引用条款替换为「每一句末尾标注」、其余行原文照抄，用于消除
     「末尾标注」与逐句评测口径的错配；
   - 检索与上下文组装复用 graph/hybrid_retrieval 同一套函数；引用标记识别与 chunk_id
     有效性判定复用 verify 节点的解析逻辑（CHUNK_ID_RE / _move_citations_before_punct /
@@ -60,8 +61,8 @@ for _p in (ROOT / "src", ROOT / "src" / "s3_eval", ROOT / "src" / "s4_agent"):
 import yaml  # noqa: E402
 from langchain_core.messages import HumanMessage, SystemMessage  # noqa: E402
 from langchain_openai import ChatOpenAI  # noqa: E402
-from llm_config import LLM_CONFIG  # noqa: E402
-from graph import SYSTEM_PROMPT, TAU_DISTANCE  # noqa: E402
+from llm_config import LLM_CONFIG, max_tokens_body  # noqa: E402
+from graph import PROMPT_VERSION, TAU_DISTANCE, load_prompt  # noqa: E402
 from hybrid_retrieval import build_search_text, hybrid_retrieve, vector_top1_distance  # noqa: E402
 from verify import CHUNK_ID_RE, _move_citations_before_punct, verify_citation  # noqa: E402
 
@@ -70,7 +71,7 @@ from verify import CHUNK_ID_RE, _move_citations_before_punct, verify_citation  #
 SENT_SPLIT_RE = re.compile(r"[。！？\n]")
 
 GROUP_A, GROUP_B, GROUP_C = "A", "B", "C"
-GROUP_DESC = {GROUP_A: "弱约束（无引用标注要求）", GROUP_B: "强约束（线上现行）",
+GROUP_DESC = {GROUP_A: "弱约束（无引用标注要求）", GROUP_B: "强约束 + 答案末尾标注",
               GROUP_C: "强约束 + 逐句末尾标注"}
 LAYER_CN = {"text": "正文", "table": "表格"}
 
@@ -120,42 +121,42 @@ def check_sentence_split(acfg: dict) -> None:
                            f"无引用 {sc['n_uncited']}（应 0），虚构 {sc['n_fabricated']}（应 0）")
 
 
-def check_weak_prompt(prod: str, weak: str, pattern: str, expect_dropped: int) -> list[str]:
-    """自检：A 组提示词必须 = 线上提示词恰好删掉命中 pattern 的那条，其余行原文照抄。"""
-    pl = [x.strip() for x in prod.splitlines() if x.strip()]
+def check_weak_prompt(base: str, weak: str, pattern: str, expect_dropped: int) -> list[str]:
+    """自检：A 组提示词必须 = B 组提示词恰好删掉命中 pattern 的那条，其余行原文照抄。"""
+    pl = [x.strip() for x in base.splitlines() if x.strip()]
     wl = [x.strip() for x in weak.splitlines() if x.strip()]
     dropped = [x for x in pl if x not in wl]
     if len(dropped) != expect_dropped:
         raise RuntimeError(f"A 组提示词应恰好删除 {expect_dropped} 行，实际删除 {len(dropped)} 行："
-                           f"{dropped}；线上提示词为：{pl}")
+                           f"{dropped}；B 组提示词为：{pl}")
     if not all(pattern in d for d in dropped):
         raise RuntimeError(f"A 组删除的行未全部命中约束模式「{pattern}」：{dropped}")
     if wl != [x for x in pl if x not in dropped]:
-        raise RuntimeError("A 组提示词除删除行外与线上不一致（顺序或文字被改动）："
-                           f"A={wl} 线上={pl}")
+        raise RuntimeError("A 组提示词除删除行外与 B 组不一致（顺序或文字被改动）："
+                           f"A={wl} B={pl}")
     if wl[0] != pl[0]:
-        raise RuntimeError(f"角色/任务首行被改动：A={wl[0]!r} 线上={pl[0]!r}")
+        raise RuntimeError(f"角色/任务首行被改动：A={wl[0]!r} B={pl[0]!r}")
     return dropped
 
 
-def check_per_sentence_prompt(prod: str, ctext: str, pattern: str, marker: str) -> list[str]:
-    """自检：C 组提示词 = 线上提示词恰好把引用条款那一行替换为逐句口径，其余行原文照抄。"""
-    pl = [x.strip() for x in prod.splitlines() if x.strip()]
+def check_per_sentence_prompt(base: str, ctext: str, pattern: str, marker: str) -> list[str]:
+    """自检：C 组提示词 = B 组提示词恰好把引用条款那一行替换为逐句口径，其余行原文照抄。"""
+    pl = [x.strip() for x in base.splitlines() if x.strip()]
     cl = [x.strip() for x in ctext.splitlines() if x.strip()]
     if len(pl) != len(cl):
-        raise RuntimeError(f"C 组提示词行数与线上不同（C={len(cl)} 行，线上={len(pl)} 行），"
+        raise RuntimeError(f"C 组提示词行数与 B 组不同（C={len(cl)} 行，B={len(pl)} 行），"
                            "应为原文替换恰好 1 行")
     diffs = [(x, y) for x, y in zip(pl, cl) if x != y]
     if len(diffs) != 1:
         raise RuntimeError(f"C 组提示词应恰好改动 1 行，实际 {len(diffs)} 行：{diffs}；"
-                           f"线上为：{pl}")
+                           f"B 组为：{pl}")
     p_line, c_line = diffs[0]
     if pattern not in p_line:
-        raise RuntimeError(f"C 组改动行不是引用标注条款（线上行未命中「{pattern}」）：{p_line}")
+        raise RuntimeError(f"C 组改动行不是引用标注条款（B 组对应行未命中「{pattern}」）：{p_line}")
     if marker not in c_line:
         raise RuntimeError(f"C 组替换行未包含「{marker}」，不是逐句标注口径：{c_line}")
     if pl[0] != cl[0]:
-        raise RuntimeError(f"角色/任务首行被改动：C={cl[0]!r} 线上={pl[0]!r}")
+        raise RuntimeError(f"角色/任务首行被改动：C={cl[0]!r} B={pl[0]!r}")
     return [p_line, c_line]
 
 
@@ -210,15 +211,17 @@ def ensure_cache(qa_set: list[dict], top_k: int, cache_path: Path, meta_path: Pa
 
 
 # --------------------------------------------------------------------------- 生成
-def make_llm(temperature: float):
+def make_llm(temperature: float, max_tokens: int):
+    """生成上限经 extra_body 传 max_tokens（原因见 llm_config.max_tokens_body）。"""
     if not LLM_CONFIG["api_key"]:
         raise RuntimeError("DEEPSEEK_API_KEY 未设置，无法调用 LLM。请先配置 .env。")
     return ChatOpenAI(base_url=LLM_CONFIG["base_url"], model=LLM_CONFIG["model"],
-                      api_key=LLM_CONFIG["api_key"], temperature=temperature)
+                      api_key=LLM_CONFIG["api_key"], temperature=temperature,
+                      **max_tokens_body(max_tokens))
 
 
 def gen_answer(llm, system_prompt: str, question: str, chunks: list[dict],
-               max_tokens: int, retries: int, retry_sleep: float) -> str:
+               retries: int, retry_sleep: float) -> str:
     """上下文与用户消息与 graph.generate / api._sse_events 完全同构，只换系统提示词。"""
     context = "\n\n".join(f"[{c['chunk_id']}]\n{build_search_text(c)}" for c in chunks)
     user = f"问题：{question}\n\n检索到的内容：\n{context}"
@@ -226,7 +229,7 @@ def gen_answer(llm, system_prompt: str, question: str, chunks: list[dict],
     last: Exception | None = None
     for attempt in range(1, retries + 2):
         try:
-            return (llm.invoke(messages, max_tokens=max_tokens).content or "").strip()
+            return (llm.invoke(messages).content or "").strip()
         except Exception as exc:  # 显式打印后重试，耗尽则抛出，不静默
             last = exc
             print(f"  !! LLM 第 {attempt} 次调用失败：{type(exc).__name__}: {exc}", file=sys.stderr)
@@ -326,7 +329,7 @@ def compare_table(buckets: list[tuple[str, dict[str, list]]], groups: list[str])
 
 def build_report(acfg: dict, rows: list[dict], dropped: list[str], c_diff: list[str],
                  groups: list[str], meta_note: str, max_tokens: int,
-                 temperature: float) -> tuple[list[str], dict]:
+                 temperature: float, n_legacy: int = 0) -> tuple[list[str], dict]:
     qa_by_id = {r["qa_id"]: r for r in rows}
     per_group = {g: [r for r in rows if r["group"] == g] for g in groups}
     aggs = {g: aggregate(per_group[g]) for g in groups}
@@ -341,18 +344,23 @@ def build_report(acfg: dict, rows: list[dict], dropped: list[str], c_diff: list[
                         [d for d in ("easy", "medium", "hard") if any(r["difficulty"] == d for r in qa_by_id.values())])
 
     title = " vs ".join(f"{g} {GROUP_DESC[g]}" for g in groups)
-    L = [f"# S4 幻觉抑制模块对照评测（{title}）", ""]
+    L = [f"# S4 引用标注对照评测（{title}）", ""]
     L.append(f"> 生成脚本：src/s4_eval/halluc_ab_eval.py；LLM：{LLM_CONFIG['model']}"
              f"（temperature={temperature} 取自 configs/config.yaml s4_halluc_ab.temperature，"
              f"max_tokens={max_tokens}，top_k={acfg['top_k']}，τ={TAU_DISTANCE}）")
+    if n_legacy:
+        L.append(f"> 注意：本次复用的 {n_legacy} 条答案生成于 max_tokens 修复（2026-09-29）之前：当时 langchain-openai "
+                 "把 max_tokens 改名为 max_completion_tokens 发出，DeepSeek 不识别，上述 max_tokens 上限并未生效。")
     L.append(f"> 检索：{meta_note}；{'、'.join(groups)} 各组每题取同一份缓存的候选 chunk，只换系统提示词。")
     if GROUP_A in groups and dropped:
-        L.append(f"> 提示词差异：A 组相对线上仅删除 {len(dropped)} 行 → "
+        L.append(f"> 提示词差异：A 组相对 B 组仅删除 {len(dropped)} 行 → "
                  + "；".join(f"「{d}」" for d in dropped))
     if GROUP_C in groups and c_diff:
-        L.append(f"> 提示词差异：C 组相对线上仅替换 1 行 → 「{c_diff[0]}」改为「{c_diff[1]}」")
+        L.append(f"> 提示词差异：C 组相对 B 组仅替换 1 行 → 「{c_diff[0]}」改为「{c_diff[1]}」")
+    L.append(f"> 线上当前使用 {PROMPT_VERSION} 组提示词（configs/config.yaml s4_agent.system_prompt）。")
     L.append("> 口径：引用标记识别与来源标识有效性判定复用 verify 节点（CHUNK_ID_RE / "
-             "_move_citations_before_punct / verify_citation），未重写正则。")
+             "_move_citations_before_punct / verify_citation），未重写正则。"
+             "「无引用句占比」衡量引用标注的覆盖，不衡量所引片段是否支持该句，也不衡量答案对错。")
     L.append("")
 
     L.append("## 1. 总体\n")
@@ -385,7 +393,7 @@ def build_report(acfg: dict, rows: list[dict], dropped: list[str], c_diff: list[
                             for g in groups if g != base)
         extra = ""
         if GROUP_B in rats and GROUP_C in rats and rats[GROUP_B] is not None:
-            extra = ("B 组残值说明：线上提示词只要求「答案末尾标注」而非逐句标注，与本指标"
+            extra = ("B 组残值说明：B 组提示词只要求「答案末尾标注」而非逐句标注，与本指标"
                      "「句内或句尾含标记」的口径天然不匹配，不能读成「大部分句子无依据」；"
                      "C 组即该口径错配的对照变体。")
         L.append(f"1. **无引用句占比**：{chain}（{d_parts}）。{extra}")
@@ -439,8 +447,11 @@ def build_report(acfg: dict, rows: list[dict], dropped: list[str], c_diff: list[
     L.append("- 虚构文档口径为 chunk_id 集合比对，未纳入文件名/书名等非结构化来源标识，"
              "bigram 句级校验仅作旁证列出。")
     if GROUP_C in groups:
+        live = ("C 组提示词已上线" if PROMPT_VERSION == GROUP_C
+                else f"线上当前为 {PROMPT_VERSION} 组，C 组未上线")
         L.append("- 「答案末尾标注」与逐句口径的错配影响已由 C 组对照量化（见第 4 节）；"
-                 "但 C 组提示词未上线，线上是否改条款需另行评审。")
+                 f"{live}。无引用句占比低只说明每句都带了引用标记，所引片段是否真的支持该句、"
+                 "答案是否正确，需要另做答案级评测。")
     else:
         L.append("- 「答案末尾标注」与逐句口径不匹配：若把线上提示词改为「逐句末尾标注」重跑，"
                  "B 组无引用句占比预期会进一台阶下降，本次未覆盖该变体。")
@@ -516,19 +527,14 @@ def main() -> None:
     groups = resolve_groups(args, acfg)
 
     # 提示词构建 + 漂移自检（未参与本轮的组也校验文件，防后续误用漂移版本）
-    weak_text = (ROOT / acfg["prompt_weak_file"]).read_text(encoding="utf-8")
-    dropped = check_weak_prompt(SYSTEM_PROMPT, weak_text,
+    prompts = {g: load_prompt(g, cfg) for g in (GROUP_A, GROUP_B, GROUP_C)}
+    dropped = check_weak_prompt(prompts[GROUP_B], prompts[GROUP_A],
                                 acfg["citation_drop_pattern"], int(acfg["citation_drop_lines"]))
-    prompts = {GROUP_A: weak_text, GROUP_B: SYSTEM_PROMPT}
-    c_diff: list[str] = []
-    if GROUP_C in groups:
-        prompts[GROUP_C] = (ROOT / acfg["prompt_per_sentence_file"]).read_text(encoding="utf-8")
-        c_diff = check_per_sentence_prompt(SYSTEM_PROMPT, prompts[GROUP_C],
-                                           acfg["citation_drop_pattern"], acfg["per_sentence_marker"])
+    c_diff = check_per_sentence_prompt(prompts[GROUP_B], prompts[GROUP_C],
+                                       acfg["citation_drop_pattern"], acfg["per_sentence_marker"])
     check_sentence_split(acfg)
-    print(f"自检通过：A 组 = 线上删 {len(dropped)} 行" +
-          (f"；C 组 = 线上替换 1 行为逐句口径" if c_diff else "") +
-          "；切句与引用识别与 verify 一致")
+    print(f"自检通过：A 组 = B 组删 {len(dropped)} 行；C 组 = B 组替换 1 行为逐句口径；"
+          f"切句与引用识别与 verify 一致；线上当前为 {PROMPT_VERSION} 组")
     print(f"题目数 {len(qa_run)}/{len(qa_full)}  组别 {'、'.join(groups)}  "
           f"temperature={temperature}  max_tokens={max_tokens}  τ={TAU_DISTANCE}\n")
 
@@ -571,10 +577,11 @@ def main() -> None:
     print()
 
     any_run = any(not p["reuse"] for p in reuse_plan.values())
-    llm = None if not any_run else make_llm(temperature)
+    llm = None if not any_run else make_llm(temperature, max_tokens)
 
     rows: list[dict] = []
     answers: list[dict] = []
+    n_legacy = 0   # 复用的、在 max_tokens 修复前生成的答案条数
     for group in groups:
         print(f"===== {group} 组：{GROUP_DESC[group]} =====")
         for i, q in enumerate(qa_run, 1):
@@ -597,12 +604,15 @@ def main() -> None:
                     old = disk[group][q["qa_id"]]
                     rec["answer"] = old["answer"]
                     answers.append({**old, "prompt_hash": reuse_plan[group]["hash"]})
+                    if "max_tokens" not in old:   # 修复前生成的答案不带该字段，当时上限未生效
+                        n_legacy += 1
                 else:
                     rec["answer"] = gen_answer(llm, prompts[group], q["question"], cr["chunks"],
-                                               max_tokens, retries, retry_sleep)
+                                               retries, retry_sleep)
                     answers.append({"qa_id": q["qa_id"], "group": group, "answer": rec["answer"],
                                     "candidate_chunk_ids": rec["candidate_chunk_ids"],
-                                    "prompt_hash": reuse_plan[group]["hash"]})
+                                    "prompt_hash": reuse_plan[group]["hash"],
+                                    "max_tokens": max_tokens})
             except Exception as exc:
                 rec["status"] = "failed"
                 rec["error"] = f"{type(exc).__name__}: {exc}"
@@ -628,7 +638,7 @@ def main() -> None:
 
     L, aggs = build_report(acfg, rows, dropped, c_diff, groups,
                            f"复用同一份落盘缓存（{len(cache_rows)} 题，top_k={acfg['top_k']}）",
-                           max_tokens, temperature)
+                           max_tokens, temperature, n_legacy)
 
     detail_csv = ROOT / acfg["detail_csv"]
     summary_md = ROOT / acfg["summary_md"]
