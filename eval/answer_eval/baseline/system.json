@@ -1,0 +1,12 @@
+{
+ "model": "deepseek-chat",
+ "temperature": 0.0,
+ "prompt_version": "C",
+ "prompt_sha1": "d7802a691b85",
+ "top_k": 5,
+ "max_tokens": 1024,
+ "tau_distance": 0.3567,
+ "corpus": "0d8fe1ee02aeecde",
+ "code_sha1": "a24e0dec87d1",
+ "system_id": "75198a4ed85b"
+}

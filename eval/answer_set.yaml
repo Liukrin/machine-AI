@@ -1,0 +1,1968 @@
+# 答案级评测集（机械设备运维知识问答 RAG 平台）
+#
+# 来源：由 Claude 通读四份手册的 MinerU 解析文本（data/chunks/chunks.jsonl）后逐条编写，
+#       参考答案只取手册原文里写明的内容；经 src/answer_eval/validate.py 做证据与数值落地校验。
+#       尚未经人工逐条复核——发现问题请直接改本文件，再跑一遍校验脚本。
+# 与 eval/qa_set.jsonl 的关系：那 36 题只标了 gold chunk、且被用来标定拒答阈值 τ；
+#       本文件的问题全部重新编写，不复用那 36 题的问句，可独立衡量误拒。
+# dev / test 划分不写在这里，见 eval/answer_set_split.json（由 validate.py --assign 生成后冻结）。
+#
+# 字段：
+#   id        稳定标识，不要改
+#   type      fact 正文事实/参数 | procedure 步骤 | table 表格查询 | cross_chunk 答案跨多个片段
+#             colloquial 口语化提问 | multi_turn 多轮追问
+#             oos_adjacent 相近领域但库里没有 | oos_in_domain 与这些泵有关但手册未写 | oos_unrelated 无关
+#   doc       期望依据的手册（doc_id）；跨手册题写列表
+#   expect    answer 应当作答 | refuse 应当拒答或说明资料不足
+#   question  发给系统的问句；multi_turn 题另有 history（前文）和 standalone（不依赖前文的改写）
+#   reference 参考答案（依据手册原文）
+#   facts     关键事实列表。say 是给人看的说明；any 是一组正则（任一命中即算答出），
+#             作用在归一化后的答案上（全角转半角、去空白、小写、℃→°c、m³→m3，见 textnorm.norm）；
+#             可用宏：{n:0.1} 有边界的数字，{to} 范围连接符，{mm} {C} {F} {in} 单位。
+#             numeric: true 表示这是数值事实，计入「数值准确率」，其数字必须能在证据原文里找到；
+#             src 用于原文数字被解析弄乱时，给出原文里的实际写法。
+#   evidence  证据：quote 是手册原文里的一段话（表格写成单元格用空格隔开），评测时解析成包含它的
+#             chunk_id；any_quote 是几种等价写法。多条 evidence 表示答案需要多个片段。
+#   absent    （拒答题）语料里不应出现的词，校验脚本会检查；absent_in 限定只查某份手册。
+
+# ============================================================================ 手册 1：D/MD/DF 型多级离心泵
+
+- id: d1_fact_01
+  type: fact
+  doc: '1'
+  expect: answer
+  question: 'MD型煤矿用耐磨多级离心泵对输送的矿井水有什么限制？'
+  reference: '用于输送固体颗粒含量（体积浓度）不大于1.5%、粒径小于0.5mm、温度不高于80℃的中性矿井水或其它类似的污水。'
+  facts:
+    - say: 固体颗粒体积浓度不大于 1.5%
+      any: ['{n:1.5}%']
+      numeric: true
+    - say: 粒径小于 0.5mm
+      any: ['{n:0.5}{mm}']
+      numeric: true
+    - say: 温度不高于 80℃
+      any: ['{n:80}{C}']
+      numeric: true
+  evidence:
+    - quote: '固体颗粒含量(体积浓度)不大于1.5%'
+
+- id: d1_fact_02
+  type: fact
+  doc: '1'
+  expect: answer
+  question: 'D型卧式多级离心泵配套电动机的防护等级和绝缘等级分别是什么？'
+  reference: '防护等级 IP44，绝缘等级 B（电压 380V、6kV 或 10kV，频率 50Hz，安装形式 B3）。'
+  facts:
+    - say: 防护等级 IP44
+      any: ['ip44']
+    - say: 绝缘等级 B
+      any: ['绝缘等级[:为是]*b(?![a-z0-9])', 'b级绝缘']
+  evidence:
+    - quote: '防护等级：IP44；绝缘等级：B'
+
+- id: d1_fact_03
+  type: fact
+  doc: '1'
+  expect: answer
+  question: 'D型泵启动前手动盘车有什么要求？'
+  reference: '启动前必须手动盘车至少一圈，确认无卡磨现象后方可运转。'
+  facts:
+    - say: 至少盘车一圈
+      any: ['至少(一|1)圈', '(一|1)圈以上']
+    - say: 无卡磨现象
+      any: ['卡磨', '卡滞', '摩擦']
+  evidence:
+    - quote: '启动前必须手动盘车至少一圈'
+
+- id: d1_fact_05
+  type: fact
+  doc: '1'
+  expect: answer
+  question: 'D型泵润滑轴承用的锂基脂应该加多少？'
+  reference: '用3#锂基脂，数量以占轴承体空间的1/3~1/2为宜。'
+  facts:
+    - say: 占轴承体空间的 1/3~1/2
+      any: ['{n:1/3}{to}{n:1/2}', '三分之一.{0,4}二分之一']
+      numeric: true
+    - say: 3# 锂基脂
+      any: ['3#锂基']
+  evidence:
+    - quote: '3#锂基脂的数量以占轴承体空间的1/3~1/2为宜'
+
+- id: d1_fact_07
+  type: fact
+  doc: '1'
+  expect: answer
+  question: 'D型泵采用变频或软启动方式时，对启动时间和频率设置有什么要求？'
+  reference: '从零转速到额定转速的时间要小于10~15秒；频率应固定设置，用泵出口阀门调节流量，防止频率变化引起扬程剧烈波动造成泵损坏。'
+  facts:
+    - say: 启动时间小于 10~15 秒
+      any: ['{n:10}{to}{n:15}(秒|s)']
+      numeric: true
+    - say: 频率固定设置
+      any: ['频率.{0,8}固定', '固定.{0,8}频率']
+    - say: 用出口阀门调节流量
+      any: ['阀门调节流量', '出口阀.{0,6}调节']
+  evidence:
+    - quote: '时间小于10~15秒'
+
+- id: d1_fact_08
+  type: fact
+  doc: '1'
+  expect: answer
+  question: 'D型泵由自冲洗改为外冲洗结构时，冲洗水的压力应满足什么要求？'
+  reference: '冲洗水压力应不小于泵进口压力+0.2MPa；如果泵为首级双吸结构，压力应不小于泵单级扬程+进口压力+0.2MPa。水质为清洁工业水。'
+  facts:
+    - say: 不小于泵进口压力 + 0.2MPa
+      any: ['{n:0.2}mpa']
+      numeric: true
+    - say: 以泵进口压力为基准
+      any: ['进口压力']
+  evidence:
+    - quote: '压力：≥泵进口压力+0.2MPa'
+
+- id: d1_fact_09
+  type: fact
+  doc: '1'
+  expect: answer
+  question: '煤矿井下配用防爆电机时，哪些系列的电机能用，哪些不能用？'
+  reference: 'YB2、YB3系列电机可用于井下，但不能用于采掘工作面；Y系列电机不能用于井下。'
+  facts:
+    - say: YB2、YB3 系列可用于井下
+      any: ['yb2.{0,3}yb3', 'yb3.{0,3}yb2']
+    - say: 不能用于采掘工作面
+      any: ['采掘工作面']
+    - say: Y 系列不能用于井下
+      any: ['(?<![a-z0-9])y系列.{0,10}不(能|得|可)']
+  evidence:
+    - quote: 'YB2、YB3系列电机可用于井下'
+
+- id: d1_fact_10
+  type: fact
+  doc: '1'
+  expect: answer
+  question: 'D型泵调整泵和电机两个联轴器的间隙之前，必须先做什么？为什么？'
+  reference: '必须先将泵轴向泵联轴器方向最大限度外拉，然后再按说明书要求调整间隙；这是为了防止泵运转后泵轴与电机轴相抵，出现断轴甚至烧电机等事故。'
+  facts:
+    - say: 先将泵轴向泵联轴器方向最大限度外拉
+      any: ['外拉']
+    - say: 防止泵轴与电机轴相抵造成断轴或烧电机
+      any: ['相抵', '断轴', '烧电机']
+  evidence:
+    - quote: '必须先将泵轴向泵联轴器方向最大限度外拉'
+
+- id: d1_fact_11
+  type: fact
+  doc: '1'
+  expect: answer
+  question: 'D型泵机组安装时校正水平，推荐的不平度是多少？'
+  reference: '推荐每1000mm长度不平度小于0.5mm。'
+  facts:
+    - say: 不平度小于 0.5mm
+      any: ['{n:0.5}{mm}']
+      numeric: true
+    - say: 以每 1000mm 长度计
+      any: ['{n:1000}{mm}', '每米', '{n:1}(m(?!m)|米)']
+      numeric: true
+  evidence:
+    - quote: '推荐每1000mm长度不平度小于0.5mm'
+
+- id: d1_fact_12
+  type: fact
+  doc: '1'
+  expect: answer
+  question: '从联轴器端向泵看，D型泵的旋转方向是什么？'
+  reference: '顺时针方向旋转。'
+  facts:
+    - say: 顺时针
+      any: ['顺时针']
+  evidence:
+    - quote: '从联轴器端向泵看，泵为顺时针方向旋转'
+
+- id: d1_fact_13
+  type: fact
+  doc: '1'
+  expect: answer
+  question: '计算水泵最大吸上高度时，安全余量一般取多少？'
+  reference: '安全余量 Hs 一般取0.5m。'
+  facts:
+    - say: 安全余量一般取 0.5m
+      any: ['{n:0.5}(m(?!m)|米)']
+      numeric: true
+  evidence:
+    - quote: '安全余量 m (一般取0.5m)'
+
+- id: d1_proc_01
+  type: procedure
+  doc: '1'
+  expect: answer
+  question: 'D型多级离心泵停止运转时应按什么顺序操作？'
+  reference: '先关闭真空表及压力表的阀门和出水管路上的闸阀，然后切断电动机的电源；如所处环境温度较低，应将泵体下部的丝堵打开，放掉剩水，以免冻裂。'
+  facts:
+    - say: 先关闭仪表阀门和出水闸阀
+      any: ['关闭.{0,30}闸阀', '闸阀.{0,10}关闭']
+    - say: 再切断电动机电源
+      any: ['切断.{0,10}电源', '断电', '断开.{0,6}电源']
+    - say: 低温时打开丝堵放掉剩水
+      any: ['丝堵', '剩水', '放.{0,4}(积水|存水)']
+  evidence:
+    - quote: '要先关闭真空表及压力表的阀门和出水管路上的闸阀'
+
+- id: d1_proc_02
+  type: procedure
+  doc: '1'
+  expect: answer
+  question: 'D型泵起动时，出水闸阀和真空表、压力表的阀门应该怎么操作？'
+  reference: '先关闭出水闸阀并向泵内注满水；起动电动机前关闭真空表及压力表与泵相连接的阀门，待转速正常后再打开仪表阀门，然后再打开出水闸阀；出口阀关闭时间不宜过长，否则容易使泵体发热而损坏。'
+  facts:
+    - say: 起动前关闭出水闸阀
+      any: ['关闭出水闸阀', '出水闸阀.{0,6}关闭']
+    - say: 转速正常后再打开
+      any: ['转速正常']
+    - say: 出口阀关闭时间不宜过长
+      any: ['不宜过长', '不能过长', '不可过长', '发热']
+  evidence:
+    - quote: '待转速正常后再打开'
+
+- id: d1_proc_03
+  type: procedure
+  doc: '1'
+  expect: answer
+  question: 'D型泵稀油润滑的轴承箱用什么润滑油？拆下油杯后往油杯里加多少油？'
+  reference: '润滑油用32#或46#汽轮机油；拆下油杯后向油杯内加2/3左右的油，再小心装到油杯底盘上旋紧。'
+  facts:
+    - say: 32# 或 46# 汽轮机油
+      any: ['32#.{0,4}46#.{0,3}汽轮机油', '汽轮机油']
+    - say: 油杯内加 2/3 左右的油
+      any: ['{n:2/3}', '三分之二']
+      numeric: true
+  evidence:
+    - quote: '向油杯内加2/3左右的油'
+
+- id: d1_table_01
+  type: table
+  doc: '1'
+  expect: answer
+  question: 'D型泵不吸水，而且真空表显示高度真空，可能是什么原因，怎么消除？'
+  reference: '原因：底阀没打开或已淤塞；吸水管路的阻力太大；吸水高度太高。消除方法：校正或更换底阀；清洗或更换吸水管路；降低吸水高度。'
+  facts:
+    - say: 底阀没打开或已淤塞
+      any: ['底阀']
+    - say: 吸水管路阻力太大
+      any: ['吸水管路.{0,8}阻力', '阻力(太|过)大']
+    - say: 吸水高度太高
+      any: ['吸水高度']
+  evidence:
+    - quote: '底阀没打开或已淤塞'
+
+- id: d1_table_02
+  type: table
+  doc: '1'
+  expect: answer
+  question: 'D型泵消耗的功率过大，有哪些原因和消除方法？'
+  reference: '填料压得太紧——拧松填料压盖；叶轮与密封环磨擦——检查原因，消除机械磨擦；流量过大——减小闸阀开度。'
+  facts:
+    - say: 填料压得太紧
+      any: ['填料.{0,6}(太|过)紧']
+    - say: 叶轮与密封环磨擦
+      any: ['密封环.{0,4}(磨|摩)擦', '叶轮与密封环']
+    - say: 流量过大
+      any: ['流量过大']
+    - say: 减小闸阀开度
+      any: ['减小闸阀开度', '关小闸阀', '闸阀开度']
+  evidence:
+    - quote: '填料压得太紧'
+
+- id: d1_table_03
+  type: table
+  doc: '1'
+  expect: answer
+  question: 'MD型泵在单级扬程小于80m的配置下，叶轮用的是什么材料？'
+  reference: 'QT500-7（球墨铸铁）。'
+  facts:
+    - say: QT500-7
+      any: ['qt500-7']
+  evidence:
+    - quote: '叶轮 HT200 QT500-7'
+  note: 材料表列为「D型泵 / MD型泵」各两组（单级扬程 <80m 与 ≥80m），拍平后列对应关系丢失，属于难题。
+
+- id: d1_cross_01
+  type: cross_chunk
+  doc: '1'
+  expect: answer
+  question: 'D型泵运转时水泵轴承的最高温度不应超过多少？如果轴承过热，常见原因有哪些？'
+  reference: '水泵轴承最高温度不应超过75℃。轴承过热的原因：轴承内没有油；泵轴与电机轴不在同一中心线上。消除方法：检查并清洗轴承体、加润滑油；校正两轴的同心度。'
+  facts:
+    - say: 轴承最高温度不超过 75℃
+      any: ['{n:75}{C}']
+      numeric: true
+    - say: 轴承内没有油
+      any: ['没有油', '缺油', '无油', '加润滑油']
+    - say: 泵轴与电机轴不在同一中心线上
+      any: ['同一中心线', '同心度', '不同心']
+  evidence:
+    - quote: '水泵轴承最高温度不应超过75℃'
+    - quote: '轴承内没有油'
+
+- id: d1_coll_01
+  type: colloquial
+  doc: '1'
+  expect: answer
+  question: 'D型泵开起来抖得厉害，可能是哪儿出了毛病？'
+  reference: '泵不正常振动的原因：泵发生了汽蚀；叶轮不平衡；泵轴与电机轴不同心；底脚螺钉松动。对应处理：调节出水闸阀使之在规定的性能范围内运转；叶轮校正静平衡；校正泵轴与电动机轴同心度；拧紧底脚螺钉。'
+  facts:
+    - say: 泵发生了汽蚀
+      any: ['汽蚀']
+    - say: 叶轮不平衡
+      any: ['不平衡']
+    - say: 泵轴与电机轴不同心
+      any: ['不同心', '同心度']
+    - say: 底脚螺钉松动
+      any: ['螺钉松动', '底脚螺钉']
+  evidence:
+    - quote: '叶轮不平衡'
+
+- id: d1_coll_02
+  type: colloquial
+  doc: '1'
+  expect: answer
+  question: 'D型泵要停很久不用，里面的水用不用放掉？'
+  reference: '要放。长期停泵时应放空泵内积水，防止泵内生锈或结冰冻裂泵体，并每隔15天将转子旋转180度。'
+  facts:
+    - say: 放空泵内积水
+      any: ['放空', '排空', '放掉', '放净', '排净']
+    - say: 每隔 15 天将转子旋转 180 度
+      any: ['{n:15}天']
+      numeric: true
+  evidence:
+    - quote: '长期停泵时放空泵内积水'
+
+# ============================================================================ 手册 2：Wilo-WR 系列多级离心泵
+
+- id: d2_fact_02
+  type: fact
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 的混凝土基础，高度方向距底座底面应留多少？'
+  reference: '高度：距底座底面20～30mm；如基础有瓷砖等装饰，则需更大空间。'
+  facts:
+    - say: 距底座底面 20～30mm
+      any: ['{n:20}{to}{n:30}{mm}']
+      numeric: true
+  evidence:
+    - quote: '高度：距底座底面20～30mm'
+
+- id: d2_fact_03
+  type: fact
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 卧式泵组用水平仪调节水平时，允许的误差幅度是多少？'
+  reference: '允许误差幅度为1%。'
+  facts:
+    - say: 允许误差幅度 1%
+      any: ['{n:1}%']
+      numeric: true
+  evidence:
+    - quote: '允许误差幅度1%'
+
+- id: d2_fact_04
+  type: fact
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 用百分表对中时，轴向和径向的最大跳动分别是多少？'
+  reference: '轴向最大跳动0.05mm（最佳值0.03mm）；径向最大跳动0.10mm（最佳值0.05mm）。'
+  facts:
+    - say: 轴向最大跳动 0.05mm
+      any: ['轴向.{0,12}{n:0.05}{mm}']
+      numeric: true
+    - say: 径向最大跳动 0.10mm
+      any: ['径向.{0,12}{n:0.1}{mm}']
+      numeric: true
+  evidence:
+    - quote: '轴向最大跳动 0.05mm'
+
+- id: d2_fact_06
+  type: fact
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 吸上工况的进水管路布置，倾角至少是多少？'
+  reference: '管路布置应有一个倾角，至少1%。'
+  facts:
+    - say: 倾角至少 1%
+      any: ['{n:1}%']
+      numeric: true
+  evidence:
+    - quote: '管路布置应有一个倾角（至少1%）'
+
+- id: d2_fact_07
+  type: fact
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 水泵带双向机械密封时，蓄压器应装在多高的位置？'
+  reference: '蓄压器应高出机械密封约1.5m。'
+  facts:
+    - say: 高出机械密封约 1.5m
+      any: ['{n:1.5}(m(?!m)|米)']
+      numeric: true
+  evidence:
+    - quote: '蓄压器应高出机械密封约1.5m'
+
+- id: d2_fact_09
+  type: fact
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 轴承应使用什么类型的润滑脂？推荐哪些牌号？'
+  reference: '使用锂基润滑脂（DIN51825），有效期内、无酸性、无腐蚀、防水，渗透率2～3。推荐牌号：OPTIMOL OLISTA LONGTIME 或 OLIT 2（OPTIMOL）、GLISSANTO 20（DEA）、ENERGREASE MSLS-EP2（BP）。'
+  facts:
+    - say: 锂基润滑脂（DIN51825）
+      any: ['锂基']
+    - say: 标准号 DIN51825
+      any: ['din51825']
+    - say: 至少给出一个推荐牌号
+      any: ['optimol', 'glissanto', 'energrease']
+  evidence:
+    - quote: '润滑脂牌号：锂基润滑脂'
+
+- id: d2_fact_10
+  type: fact
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 采用填料密封时，正常的泄漏量应该是多少？'
+  reference: '填料密封的泄漏量应为5～10L/h。'
+  facts:
+    - say: 泄漏量 5～10 L/h
+      any: ['{n:5}{to}{n:10}l/?h', '{n:5}{to}{n:10}升']
+      numeric: true
+  evidence:
+    - quote: '确认泄漏量为5～10Lh'
+
+- id: d2_fact_11
+  type: fact
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 输送气体介质时应采用哪种轴封？如果用机械密封要注意什么？'
+  reference: '输送气体介质时必须采用填料密封；采用机械密封时，必须确保密封腔内无气体。'
+  facts:
+    - say: 必须采用填料密封
+      any: ['填料密封']
+    - say: 机械密封时密封腔内无气体
+      any: ['无气体', '没有气体', '不(得|能)有气体']
+  evidence:
+    - quote: '输送气体介质时，必须采用填料密封'
+
+- id: d2_fact_12
+  type: fact
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 水泵检查转向时发现反转了，应该怎么处理？'
+  reference: '转向须与泵的转向标记一致；若反向，更换电源相序。切勿反向运转。'
+  facts:
+    - say: 更换电源相序
+      any: ['相序']
+  evidence:
+    - quote: '若反向，更换电源相序'
+
+- id: d2_fact_13
+  type: fact
+  doc: '2'
+  expect: answer
+  question: '为什么 Wilo-WR 不允许在进出水阀门都关闭的情况下启动泵？'
+  reference: '因为此时泵腔内的水会迅速汽化并产生很高的压力，可能会超过泵体的承压而造成人身或设备的伤害。'
+  facts:
+    - say: 泵腔内的水迅速汽化
+      any: ['汽化']
+    - say: 产生很高的压力，可能超过泵体承压
+      any: ['压力']
+  evidence:
+    - quote: '此时泵腔内的水会迅速汽化并产生很高的压力'
+
+- id: d2_fact_14
+  type: fact
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 联轴器对中调整高度误差时，多长以下的底座只需在电机与水泵的范围内调节？'
+  reference: '对1600mm以下的底座，只在电机与水泵的范围内调节即可；对更大的底座，需在多处调整。'
+  facts:
+    - say: 1600mm 以下的底座
+      any: ['{n:1600}{mm}', '{n:1.6}(m(?!m)|米)']
+      numeric: true
+  evidence:
+    - quote: '对1600mm以下的底座'
+
+- id: d2_fact_15
+  type: fact
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 进水管路上的滤网到池底的距离至少应为多少？'
+  reference: '滤网至池底的距离至少为管径的一半。'
+  facts:
+    - say: 至少为管径的一半
+      any: ['管径的一半', '一半', '{n:1/2}', '{n:0.5}倍']
+  evidence:
+    - quote: '至少为管径的一半'
+
+- id: d2_proc_01
+  type: procedure
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 停泵时应按哪些步骤操作？'
+  reference: '关闭出水阀门；断电；如出水侧装有止回阀，即使上游仍有压力，也不需关闭截止阀；关闭旁路阀门。'
+  facts:
+    - say: 关闭出水阀门
+      any: ['关闭出水阀']
+    - say: 断电
+      any: ['断电', '切断.{0,4}电源', '断开.{0,4}电源']
+    - say: 关闭旁路阀门
+      any: ['旁路阀']
+  evidence:
+    - quote: '如出水侧装有止回阀，即使上游仍有压力，也不需关闭截止阀'
+
+- id: d2_proc_02
+  type: procedure
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 更换填料的操作步骤是什么？'
+  reference: '打开填料压盖；取出旧填料；仔细清洗填料区；如填料轴套出现严重的磨痕，须修复或更换；必要时更换水封环；均匀拧紧填料压盖；然后按重启动程序启动。'
+  facts:
+    - say: 打开填料压盖
+      any: ['打开填料压盖']
+    - say: 取出旧填料
+      any: ['取出旧填料', '旧填料']
+    - say: 清洗填料区
+      any: ['清洗填料区', '清洗']
+    - say: 必要时更换水封环
+      any: ['水封环']
+    - say: 均匀拧紧填料压盖
+      any: ['均匀拧紧']
+  evidence:
+    - quote: '取出旧填料'
+
+- id: d2_proc_03
+  type: procedure
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 注水排气时，出水阀门和进水阀门应处于什么状态？泵内的空气从哪里排出？'
+  reference: '关闭出水阀门，打开进水阀门（如有）；注入输送的介质，松开泵体上的排气塞排出空气，并用手转动泵轴排净空气。'
+  facts:
+    - say: 关闭出水阀门
+      any: ['关闭出水阀']
+    - say: 打开进水阀门
+      any: ['打开进水阀']
+    - say: 松开泵体上的排气塞排气
+      any: ['排气塞']
+  evidence:
+    - quote: '注入输送的介质，松开泵体上的排气塞，排出空气'
+
+- id: d2_table_01
+  type: table
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 爪型联轴器外径为 160~225mm 时，两个半联轴节端面的间距 C 应为多少？'
+  reference: '间距 C 为 2~6mm。'
+  facts:
+    - say: 间距 2~6mm
+      any: ['{n:2}{to}{n:6}{mm}']
+      numeric: true
+  evidence:
+    - quote: '160~225mm 2~6mm'
+
+- id: d2_table_03
+  type: table
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 壳体材质为 GGG 时，水泵的最大承压是多少？'
+  reference: 'GGG 壳体的最大承压为 40 bar（GG 壳体为 25 bar），对应介质温度 0℃～+100℃。'
+  facts:
+    - say: GGG 壳体最大承压 40 bar
+      any: ['{n:40}bar']
+      numeric: true
+  evidence:
+    - quote: '水泵最大承压[bar]'
+
+- id: d2_table_04
+  type: table
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 管径为 150mm 时，水泵允许承受的合力 ∑F 是多少？'
+  reference: '管径150mm时允许的合力 ∑F 为 240 daN。'
+  facts:
+    - say: ∑F 为 240 daN
+      any: ['{n:240}dan']
+      numeric: true
+  evidence:
+    - quote: '∑F 160 200 240 315'
+
+- id: d2_table_05
+  type: table
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 的零件清单里，零件号 458 是什么零件？'
+  reference: '水封环。'
+  facts:
+    - say: 水封环
+      any: ['水封环']
+  evidence:
+    - quote: '458 水封环'
+
+- id: d2_table_06
+  type: table
+  doc: '2'
+  expect: answer
+  question: '按 Wilo-WR 的故障表，电机过载可能是哪些原因造成的？'
+  reference: '管路系统或泵堵塞、易损件磨损、转速过高、电机缺相、对中有误、填料过紧（填料密封时）、介质粘度/密度过大。'
+  facts:
+    - say: 管路系统或泵堵塞
+      any: ['堵塞']
+    - say: 易损件磨损
+      any: ['易损件', '磨损']
+    - say: 转速过高
+      any: ['转速过高']
+    - say: 电机缺相
+      any: ['缺相']
+    - say: 对中有误
+      any: ['对中']
+    - say: 填料过紧
+      any: ['填料过紧', '填料.{0,3}(太|过)紧']
+    - say: 介质粘度/密度过大
+      any: ['粘度', '密度']
+  evidence:
+    - quote: '电机缺相'
+  note: 故障表用打勾矩阵标明每条原因对应哪种故障，拍平后空单元格被丢掉、打勾的列位置丢失，属于难题。
+
+- id: d2_cross_01
+  type: cross_chunk
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 的进水管路（吸上工况）和出水管路，最大流速分别是多少？'
+  reference: '进水管路最大流速 2m/s，出水管路最大流速 2.5m/s。'
+  facts:
+    - say: 进水管路最大流速 2m/s
+      any: ['{n:2}m/s']
+      numeric: true
+    - say: 出水管路最大流速 2.5m/s
+      any: ['{n:2.5}m/s', '2\. 5m/s']
+      numeric: true
+      src: '2. 5m/s'
+  evidence:
+    - quote: '最大流速2m/s（泵为最大流量）'
+    - quote: '最大流速 2. 5m/s'
+
+- id: d2_cross_02
+  type: cross_chunk
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 的混凝土基础长度要比底座长多少？泵组对中紧固后浇注底座，凝固时间至少要多久？'
+  reference: '基础长度至少比底座长100mm；浇注后凝固时间至少48小时。'
+  facts:
+    - say: 基础长度至少比底座长 100mm
+      any: ['{n:100}{mm}']
+      numeric: true
+    - say: 凝固时间至少 48 小时
+      any: ['{n:48}(小时|h)']
+      numeric: true
+  evidence:
+    - quote: '长度：至少比底座长 100mm'
+    - quote: '凝固时间至少 48 小时'
+
+- id: d2_cross_03
+  type: cross_chunk
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 立式泵（型式V）安装时，两联轴节的轴向间隙按哪张表调整？联轴器外径 250~400mm 时间距是多少？'
+  reference: '按 3.3.2.1 节的表1调整；联轴器外径 250~400mm 时间距 C 为 3~8mm。'
+  facts:
+    - say: 按 3.3.2.1 节表 1
+      any: ['3\.3\.2\.1', '表1']
+    - say: 250~400mm 时间距 3~8mm
+      any: ['{n:3}{to}{n:8}{mm}']
+      numeric: true
+  evidence:
+    - quote: '调整两联轴节的轴向间隙（见 3.3.2.1，表1）'
+    - quote: '250~400mm 3~8mm'
+
+- id: d2_coll_01
+  type: colloquial
+  doc: '2'
+  expect: answer
+  question: 'Wilo 这台泵的密封冲洗水，压力得调到多高才行？'
+  reference: '密封冲洗水压力至少比水泵的最大压力高0.5bar，通过压力调节阀设置。'
+  facts:
+    - say: 至少比水泵最大压力高 0.5bar
+      any: ['{n:0.5}bar']
+      numeric: true
+  evidence:
+    - quote: '密封冲洗水压力至少比水泵的最大压力高0.5bar'
+
+- id: d2_coll_02
+  type: colloquial
+  doc: '2'
+  expect: answer
+  question: 'Wilo-WR 的轴承摸着发烫，温度到多少算超标？'
+  reference: '轴承温度不得高于环境温度40℃。'
+  facts:
+    - say: 不得高于环境温度 40℃
+      any: ['{n:40}{C}']
+      numeric: true
+    - say: 以环境温度为基准
+      any: ['环境温度']
+  evidence:
+    - quote: '高于环境温度40℃'
+
+- id: d2_coll_03
+  type: colloquial
+  doc: '2'
+  expect: answer
+  question: 'Wilo 的泵要在仓库里放三个多月，存放上要注意些啥？'
+  reference: '用纸板或法兰盲板盖住泵的进出口；存放在干燥清洁处，防止霜冻及高温；每2周盘车一次，并使转子停留在不同角度；长期存放（3个月以上）需做专门处理。'
+  facts:
+    - say: 盖住泵的进出口
+      any: ['盖住', '盲板', '纸板']
+    - say: 存放在干燥清洁处
+      any: ['干燥']
+    - say: 每 2 周盘车一次
+      any: ['{n:2}周', '两周']
+      numeric: true
+    - say: 3 个月以上需做专门处理
+      any: ['专门处理']
+  evidence:
+    - quote: '每2 周盘车一次'
+
+# ============================================================================ 手册 3：Leader 离心泵 / 潜水泵
+
+- id: d3_fact_01
+  type: fact
+  doc: '3'
+  expect: answer
+  question: 'Leader 离心泵上的 Hydrotronic 控制器有什么作用？'
+  reference: '用于控制泵的自动运行：出水侧的阀门打开时泵启动，阀门关闭时泵停止；还提供空载保护功能，即在无水条件下不允许泵运行。Ecotronic 系列出厂时即配备此控制器。'
+  facts:
+    - say: 控制泵自动启停
+      any: ['自动运行', '阀门打开.{0,12}启动', '自动启']
+    - say: 空载保护（无水不允许运行）
+      any: ['空载保护', '无水.{0,12}不(允许|能|会)']
+  evidence:
+    - quote: 'Hydrotronic 还提供空载保护功能'
+
+- id: d3_fact_02
+  type: fact
+  doc: '3'
+  expect: answer
+  question: 'Leader 离心泵在预混添加剂的情况下使用，多久要用清水冲洗一次？'
+  reference: '必须至少每周用清洁水冲洗泵，建议每24小时用清水冲洗一次。'
+  facts:
+    - say: 至少每周冲洗
+      any: ['每周', '一周']
+    - say: 建议每 24 小时冲洗一次
+      any: ['{n:24}小时']
+      numeric: true
+  evidence:
+    - quote: '必须至少每周用清洁水冲洗泵'
+
+- id: d3_fact_03
+  type: fact
+  doc: '3'
+  expect: answer
+  question: 'Leader 离心泵没有启动时要检查复位开关，哪些型号有这个开关，装在什么位置？'
+  reference: '在某些型号（Ecoplus 240、250 和 Ecojet 120、130）中，复位开关位于电机侧面的黑色电气盒上，按下复位开关即可复位。'
+  facts:
+    - say: 位于电机侧面的黑色电气盒上
+      any: ['电气盒']
+    - say: 适用型号 Ecoplus 240/250、Ecojet 120/130
+      any: ['ecoplus.{0,3}240', 'ecojet.{0,3}120']
+  evidence:
+    - quote: '复位开关位于电机侧面的黑色电气盒上'
+
+- id: d3_fact_04
+  type: fact
+  doc: '3'
+  expect: answer
+  question: 'Leader 潜水泵的 Ecosub、Verty-Go 和 Ecodiver 三种类型各自适合什么工况？'
+  reference: 'Ecosub 和 Verty-Go 专为大流量、低扬程/压力作业而设计；Ecodiver 专为高扬程/压力和小流量作业而设计；Verty-Go 配备一个内置浮控开关。'
+  facts:
+    - say: Ecosub 和 Verty-Go 适合大流量、低扬程
+      any: ['大流量']
+    - say: Ecodiver 适合高扬程、小流量
+      any: ['高扬程']
+  evidence:
+    - quote: 'Ecodiver专为高扬程/压力和小流量作业而设计'
+
+- id: d3_fact_05
+  type: fact
+  doc: '3'
+  expect: answer
+  question: 'Leader 离心泵从蓄水池底部的出水口抽水时，管路上需要加装什么？'
+  reference: '应在蓄水池出水口和泵的进水管道之间安装止回阀。'
+  facts:
+    - say: 安装止回阀
+      any: ['止回阀']
+  evidence:
+    - quote: '应在蓄水池出水口和泵的进水管道之间安装止回阀'
+
+- id: d3_fact_06
+  type: fact
+  doc: '3'
+  expect: answer
+  question: 'Leader 离心泵所在位置的温度可能降到冰点以下时，应该怎么处理？'
+  reference: '必须将泵排空，否则会导致泵损坏。'
+  facts:
+    - say: 将泵排空
+      any: ['排空', '放空', '排净', '排干']
+  evidence:
+    - quote: '必须将泵排空，否则会导致泵损坏'
+
+- id: d3_fact_07
+  type: fact
+  doc: '3'
+  expect: answer
+  question: 'Leader 潜水泵的进水口区域多久需要清洁一次？'
+  reference: '每周至少清洁一次进水口区域，以确保其保持清洁、无碎屑。'
+  facts:
+    - say: 每周至少一次
+      any: ['每周', '一周']
+  evidence:
+    - quote: '每周至少清洁一次进水口区域'
+
+- id: d3_table_01
+  type: table
+  doc: '3'
+  expect: answer
+  question: 'Leader Ecotronic 泵不停地启动又停止，是什么原因，怎么解决？'
+  reference: '原因：系统气密性不佳；设备内可能存在异物。解决：检查系统和泵的连接；断开泵的连接，拆卸泵的电子装置，用水仔细冲洗入口。'
+  facts:
+    - say: 系统气密性不佳
+      any: ['气密性']
+    - say: 设备内可能存在异物
+      any: ['异物']
+  evidence:
+    - quote: '系统气密性不佳'
+
+- id: d3_table_02
+  type: table
+  doc: '3'
+  expect: answer
+  question: 'Leader Ecoplus 泵能转动但是不出水，可能是什么原因？'
+  reference: '泵内的空气尚未完全排出（泵壳无水）；空气从吸入管进入；吸入阀未浸入水中、吸入阀堵塞或超过最大吸入深度。'
+  facts:
+    - say: 泵内空气未完全排出
+      any: ['空气.{0,8}(未|没).{0,8}排出', '泵壳.{0,2}无水', '泵内.{0,6}空气']
+    - say: 空气从吸入管进入
+      any: ['吸入管']
+    - say: 吸入阀未浸入水中、堵塞或超过最大吸入深度
+      any: ['吸入阀', '吸入深度']
+  evidence:
+    - quote: '空气从吸入管进入'
+
+- id: d3_coll_01
+  type: colloquial
+  doc: '3'
+  expect: answer
+  question: '家里那台 Ecojet 插上电一点反应都没有，咋整？'
+  reference: '先检查电源插座和插头；如果是热过载保护或电流保护跳闸：按下泵上的电流保护重置按钮（仅 ECOJET 120 和 130 型号），或等待足够的冷却时间让热保护器重启；如果卡轴，拔下电源插头，用螺丝刀旋转电机轴；如果叶轮堵塞，拔下插头后拆卸并清洗泵。'
+  facts:
+    - say: 检查电源插座和插头
+      any: ['插座', '插头', '插电']
+    - say: 保护跳闸后按重置按钮或等待冷却
+      any: ['重置', '复位', '冷却']
+    - say: 卡轴时用螺丝刀旋转电机轴
+      any: ['螺丝刀', '卡轴', '卡住']
+  evidence:
+    - any_quote: ['按下泵上的电流保护重置按钮', '如果泵未启动，请检查复位开关']
+
+- id: d3_coll_02
+  type: colloquial
+  doc: '3'
+  expect: answer
+  question: 'Leader 潜水泵有一截露在水面上，还能接着开吗？'
+  reference: '不能。操作时潜水泵（包括手柄）必须完全浸没；在水位低于提手的情况下操作泵会导致泵损坏。'
+  facts:
+    - say: 必须完全浸没
+      any: ['完全浸没', '全部浸没', '浸没']
+    - say: 否则会导致泵损坏
+      any: ['损坏']
+  evidence:
+    - quote: 'Leader 潜水泵（包括手柄）必须完全浸没'
+
+# ============================================================================ 手册 4：Model 3700（API 610 OH2）
+
+- id: d4_fact_04
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 用顶推螺栓安装底板时，底板与基础表面之间的距离应控制在什么范围？'
+  reference: '应在19毫米（0.75英寸）和38毫米（1.50英寸）之间。'
+  facts:
+    - say: 下限 19 毫米
+      any: ['{n:19}{mm}', '{n:0.75}{in}']
+      numeric: true
+    - say: 上限 38 毫米
+      any: ['{n:38}{mm}', '{n:1.5}{in}']
+      numeric: true
+  evidence:
+    - quote: '确保底板与基础表面之间的距离在 19 毫米'
+
+- id: d4_fact_05
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 调平驱动机安装垫后，正确的水平测量值和底板两侧的最大差异分别是多少？'
+  reference: '正确的水平测量值大约为0.167毫米/米（0.002英寸/英尺）；从底板一侧到另一侧的最大差异为0.38毫米（0.015英寸）。'
+  facts:
+    - say: 水平测量值约 0.167 毫米/米
+      any: ['{n:0.167}{mm}', '{n:0.002}{in}/英尺']
+      numeric: true
+    - say: 两侧最大差异 0.38 毫米
+      any: ['{n:0.38}{mm}', '{n:0.015}{in}']
+      numeric: true
+  evidence:
+    - quote: '正确的水平测量值大约为 0.167 毫米/米'
+
+- id: d4_fact_06
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 手册提到通常使用哪三种校准方法？'
+  reference: '千分表、反向千分表、激光。'
+  facts:
+    - say: 反向千分表
+      any: ['反向千分表']
+    - say: 激光
+      any: ['激光']
+  evidence:
+    - quote: '通常使用三种校准方法'
+
+- id: d4_fact_07
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 在哪些情况下必须执行校准检查？'
+  reference: '处理温度发生变化；管道发生改变；泵经过维修。'
+  facts:
+    - say: 处理温度发生变化
+      any: ['温度.{0,6}变化']
+    - say: 管道发生改变
+      any: ['管道.{0,6}(改变|变化|变更|更改|改动)']
+    - say: 泵经过维修
+      any: ['维修']
+  evidence:
+    - quote: '必须在这些环境下执行校准检查'
+
+- id: d4_fact_08
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 由电机驱动时，电机轴初始（冷态）平行垂直对齐应比泵轴低多少？'
+  reference: '应比泵轴低0.05到0.10毫米（0.002到0.004英寸）。'
+  facts:
+    - say: 比泵轴低 0.05 到 0.10 毫米
+      any: ['{n:0.05}({mm})?{to}{n:0.1}{mm}', '{n:0.002}({in})?{to}{n:0.004}{in}']
+      numeric: true
+  evidence:
+    - quote: '电机轴初始（冷）平行垂直对齐设置应比泵轴低 0.05 到 0.10 毫米'
+
+- id: d4_fact_09
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 用千分表检查最终校准时，工作温度下千分表的总读数（T.I.R.）不超过多少才算校准正确？'
+  reference: '工作温度下千分表的总读数（T.I.R.）为0.05毫米（0.002英寸）或更低。'
+  facts:
+    - say: 总读数 0.05 毫米或更低
+      any: ['{n:0.05}{mm}', '{n:0.002}{in}']
+      numeric: true
+  evidence:
+    - quote: '工作温度下千分表的总读数 (T.I.R.) 为 0.05 毫米'
+
+- id: d4_fact_11
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 启动时，泵的温度变化每分钟不能超过多少？'
+  reference: '温度变化每分钟不超过19℃（35°F）。'
+  facts:
+    - say: 每分钟不超过 19℃
+      any: ['{n:19}{C}', '{n:35}{F}']
+      numeric: true
+  evidence:
+    - quote: '确保温度变化每分钟不超过 19℃'
+
+- id: d4_fact_12
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 抽运的液体温度超过多少时，需要在操作前先加热泵？要保温多久？'
+  reference: '抽运液体温度超过200°F（93°C）时，需在操作前加热泵：让少量液体在泵内循环，直到泵壳温度达到与液体温度相差100°F（38°C）以内，并在过程液体温度下浸泡2小时。'
+  facts:
+    - say: 液体温度超过 200°F（93°C）
+      any: ['{n:200}{F}', '{n:93}{C}']
+      numeric: true
+    - say: 在过程液体温度下浸泡 2 小时
+      any: ['{n:2}小时', '两小时']
+      numeric: true
+  evidence:
+    - quote: '如果抽运液体的问题将超过 200°F (93°C)，请在操作前加热泵'
+
+- id: d4_fact_13
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 在绝大多数工作条件下，轴承温度应处于什么范围？应使用什么粘度等级的润滑油？'
+  reference: '轴承温度应介于49°C（120°F）和82°C（180°F）之间，可使用ISO粘度级别为68的润滑油；如果轴承架的温度超过82°C（180°F），使用ISO粘度级别100。'
+  facts:
+    - say: 温度下限 49°C（120°F）
+      any: ['{n:49}{C}', '{n:120}{F}']
+      numeric: true
+    - say: 温度上限 82°C（180°F）
+      any: ['{n:82}{C}', '{n:180}{F}']
+      numeric: true
+    - say: ISO 粘度级别 68
+      any: ['(粘度|vg|iso).{0,10}{n:68}', '{n:68}(号|#)']
+      numeric: true
+  evidence:
+    - quote: '轴承温度应该介于 49°C | 120°F 和 82°C | 180°F 之间'
+
+- id: d4_fact_16
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 的年度检查包括哪些项目？'
+  reference: '检查泵容量；检查泵压力；检查泵电源；检查动力端的所有插头和密封。'
+  facts:
+    - say: 检查泵容量
+      any: ['容量']
+    - say: 检查泵压力
+      any: ['泵压力', '压力']
+    - say: 检查泵电源
+      any: ['电源']
+    - say: 检查动力端的所有插头和密封
+      any: ['插头']
+  evidence:
+    - quote: '每年执行一次下面的检查'
+
+- id: d4_fact_17
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 的叶轮平衡应达到什么标准？'
+  reference: '应符合 ISO 1940 G1.0 标准；超出该标准时需重新平衡叶轮，且必须有特别精确的工具设备才能做到。'
+  facts:
+    - say: ISO 1940 G1.0
+      any: ['iso1940']
+    - say: 等级 G1.0
+      any: ['g1\.0']
+  evidence:
+    - quote: '超出 ISO 1940 G1.0 标准时，重新平衡叶轮'
+
+- id: d4_fact_18
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 检查轴的直度时，伸出（跳动）超过多少就要更换轴？'
+  reference: '伸出超过0.001英寸（0.03毫米）时更换轴。'
+  facts:
+    - say: 超过 0.001 英寸（0.03 毫米）
+      any: ['{n:0.03}{mm}', '{n:0.001}{in}']
+      numeric: true
+  evidence:
+    - quote: '更换轴，条件是伸出超过0.001 英寸（0.03 毫米）'
+
+- id: d4_fact_19
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 安装新的叶轮磨损环之前，要把它加热到多少度？'
+  reference: '用一致的加热方法（例如烤箱）把新叶轮磨损环加热到180°至200°F（82°至93°C），然后放在叶轮磨损环座上。'
+  facts:
+    - say: 加热到 180°~200°F（82°~93°C）
+      any: ['{n:82}.{0,3}{to}.{0,1}{n:93}', '{n:180}.{0,3}{to}.{0,1}{n:200}']
+      numeric: true
+  evidence:
+    - quote: '将新叶轮磨损环加热到 180° 至 200° F（82° 至 93° C）'
+
+- id: d4_fact_20
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 叶轮磨损环的伸出（跳动）超过多少时需要排查处理？'
+  reference: '叶轮磨损环伸出超过0.005英寸（0.13毫米）时，需检查定位螺丝区域是否变形、检查轴伸出及各匹配面是否垂直、校准损环表面并重新检查伸出。'
+  facts:
+    - say: 超过 0.005 英寸（0.13 毫米）
+      any: ['{n:0.13}{mm}', '{n:0.005}{in}']
+      numeric: true
+  evidence:
+    - quote: '如果叶轮磨损环伸出超过 0.005 英寸（0.13 毫米）'
+
+- id: d4_fact_21
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 把轴承装配到轴上之前，要用感应加热器把轴承预热到多少度？'
+  reference: '用感应加热器将轴承预热到120°C（250°F）；感应加热器还可以对轴承消磁。'
+  facts:
+    - say: 预热到 120°C（250°F）
+      any: ['{n:120}{C}', '{n:250}{F}']
+      numeric: true
+  evidence:
+    - quote: '通过电感式加热器将轴承预热到'
+  note: 原文温度写在被拆散的公式里（$1 2 0 ^ { \circ } …$），考察模型能否读出。
+
+- id: d4_fact_22
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 组装轴承箱时，轴端余隙（总行程）应在什么范围内？'
+  reference: '总行程（轴端余隙）必须在0.025到0.125 mm（0.001到0.005英寸）的范围内。'
+  facts:
+    - say: 0.025 到 0.125 mm
+      any: ['{n:0.025}.{0,3}{to}.{0,1}{n:0.125}', '{n:0.001}.{0,3}{to}.{0,1}{n:0.005}{in}']
+      numeric: true
+  evidence:
+    - quote: '总行程（轴端余隙）必须在 0.025 到 0.125 mm'
+
+- id: d4_fact_23
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 的压力边界硬件（如泵壳螺栓、压盖螺栓）螺纹上应使用什么润滑剂？'
+  reference: '压力边界硬件（项目 353、355、356A 和 425）需要螺纹润滑剂，使用镍基或钼基抗扯裂化合物。'
+  facts:
+    - say: 镍基抗扯裂化合物
+      any: ['镍基']
+    - say: 或钼基抗扯裂化合物
+      any: ['钼基']
+  evidence:
+    - quote: '使用镍基或钼基抗扯裂化合物'
+
+- id: d4_fact_25
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 的哪些型号有两个油环，哪些只有一个？'
+  reference: 'SX、MX、LA、LX、XLA 和 XLX 泵有两个油环；SA 和 MA 泵只有一个油环。'
+  facts:
+    - say: SA 和 MA 只有一个油环
+      any: ['(sa.{0,3}ma|ma.{0,3}sa).{0,20}(一|1)个', '(一|1)个.{0,20}(sa|ma)']
+    - say: SX、MX、LA、LX、XLA、XLX 有两个油环
+      any: ['(sx|mx|lx|xla|xlx).{0,40}(两|二|2)个', '(两|二|2)个.{0,40}(sx|mx|lx|xla|xlx)']
+  evidence:
+    - any_quote: ['SX、MX、LA、LX、XLA 和 XLX 泵有两个油环', 'SX、MX、LA、LX、XLA 和 XLX 2']
+
+- id: d4_fact_26
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 机械密封的使用寿命大概是多久？'
+  reference: '手册没有给出具体寿命：机械密封的寿命取决于抽运液体的清洁度，由于工作条件多种多样，无法给出机械密封的具体寿命。'
+  facts:
+    - say: 无法给出具体寿命
+      any: ['无法给出', '没有给出', '未给出', '不能给出', '无法确定', '没有具体']
+    - say: 取决于抽运液体的清洁度
+      any: ['清洁度']
+  evidence:
+    - quote: '无法给出机械密封的具体寿命'
+  note: 手册明确说给不出数值；编造小时数或年限即为幻觉。
+
+- id: d4_fact_27
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 的保修不包括哪些原因造成的故障？'
+  reference: '维护不充分；安装不正确；未征询 ITT 而对产品和安装进行修改或改动；维修工作执行不正确；正常磨损。'
+  facts:
+    - say: 维护不充分
+      any: ['维护不充分']
+    - say: 安装不正确
+      any: ['安装不正确']
+    - say: 未征询 ITT 而进行修改或改动
+      any: ['修改', '改动']
+    - say: 正常磨损
+      any: ['正常磨损']
+  evidence:
+    - quote: '保修不包括以下原因造成的故障'
+
+- id: d4_fact_28
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 安装推力反向器风扇时，它和推力轴承端盖之间应留多大距离？'
+  reference: '约0.03英寸（0.8毫米）。'
+  facts:
+    - say: 约 0.03 英寸（0.8 毫米）
+      any: ['{n:0.8}{mm}', '{n:0.03}{in}']
+      numeric: true
+  evidence:
+    - quote: '将推力反向器风扇安装在距离推力轴承端盖约 0.03 英寸（0.8 毫米）的位置'
+
+- id: d4_fact_29
+  type: fact
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 接合泵壳（打定位销）需要准备哪些工具？'
+  reference: '两个7号锥形销钉；一个7号锥形销钉钻孔器；0.3320英寸或“Q”大小钻头；硬木塞或软面锤。'
+  facts:
+    - say: 7 号锥形销钉
+      any: ['锥形销钉']
+    - say: 锥形销钉钻孔器
+      any: ['钻孔器']
+    - say: 0.3320 英寸或 Q 大小钻头
+      any: ['{n:0.3320}{in}', 'q.{0,2}大小', '钻头']
+    - say: 硬木塞或软面锤
+      any: ['软面锤', '硬木塞']
+  evidence:
+    - quote: '0.3320 英寸或“Q”大小钻头'
+
+- id: d4_proc_01
+  type: procedure
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 起动泵的操作步骤是什么？'
+  reference: '启动前打开抽吸阀门，打开任何再循环或冷却管路；然后：1. 视系统状况完全关闭或部分打开排放阀；2. 起动驱动机；3. 慢慢打开排放阀，直至泵达到所需的流量；4. 立即检查压力表，确保泵快速达到正确的排放压力；5. 如果泵未达到正确压力，停止驱动机、再次灌泵、重新启动驱动机；6. 泵运转时监控轴承温度、振动和噪音。'
+  facts:
+    - say: 启动前打开抽吸阀门
+      any: ['打开抽吸阀']
+    - say: 起动驱动机
+      any: ['(起|启)动驱动机']
+    - say: 慢慢打开排放阀至所需流量
+      any: ['(慢慢|缓慢|逐渐).{0,4}打开排放阀']
+    - say: 立即检查压力表
+      any: ['压力表']
+    - say: 未达正确压力时停机、再次灌泵、重新启动
+      any: ['再次灌泵', '重新灌']
+  evidence:
+    - quote: '慢慢打开排放阀，直至泵达到所需的流量'
+
+- id: d4_proc_02
+  type: procedure
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 在抽吸源高于泵的情况下，灌泵的步骤是什么？'
+  reference: '1. 慢慢地打开抽吸阀门；2. 打开抽吸和排放管道的排气口，直至抽运液体流出；3. 关闭排气口。'
+  facts:
+    - say: 慢慢打开抽吸阀门
+      any: ['打开抽吸阀']
+    - say: 打开排气口直至液体流出
+      any: ['排气口.{0,20}流出', '打开.{0,12}排气口']
+    - say: 关闭排气口
+      any: ['关闭排气口']
+  evidence:
+    - quote: '打开抽吸和排放管道的排气口，直至抽运液体流出'
+
+- id: d4_proc_03
+  type: procedure
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 底板灌浆的主要步骤有哪些？灌完后要等多久？'
+  reference: '1. 清洁底板与灌浆接触的区域；2. 在基础周围设立挡板；3. 彻底润湿与灌浆部分接触的基础；4. 将灰浆灌至底板的灌浆孔，灌至与挡板平齐，并用振动器搅拌或抽吸的方法去除气泡；5. 让灰浆固定；6. 用灰浆填满底板的剩余部分，并留出至少48小时的灰浆凝固时间；7. 灰浆固化后拆卸校平顶推螺栓；8. 拧紧基础的螺栓。'
+  facts:
+    - say: 在基础周围设立挡板
+      any: ['挡板']
+    - say: 彻底润湿基础
+      any: ['润湿']
+    - say: 去除气泡
+      any: ['气泡']
+    - say: 至少 48 小时凝固时间
+      any: ['{n:48}(小时|h)']
+      numeric: true
+    - say: 固化后拆卸顶推螺栓并拧紧基础螺栓
+      any: ['顶推螺栓']
+  evidence:
+    - quote: '留出至少 48 小时的灰浆凝固时间'
+
+- id: d4_proc_04
+  type: procedure
+  doc: '4'
+  expect: answer
+  question: 'Model 3700/3710 卸下叶轮的步骤是什么？'
+  reference: '1. 拧松叶轮螺母末端的定位螺丝；2. 拧松并卸下叶轮螺母（叶轮螺母为左侧螺纹）；3. 将叶轮从轴拉下，需要时使用扩张型拉出器；4. 卸下叶轮平键，除非损坏，保存以便重新组装。搬运叶轮时佩戴厚作业手套。'
+  facts:
+    - say: 拧松叶轮螺母末端的定位螺丝
+      any: ['定位螺丝']
+    - say: 拧松并卸下叶轮螺母
+      any: ['卸下叶轮螺母', '叶轮螺母']
+    - say: 叶轮螺母为左侧螺纹
+      any: ['左侧螺纹', '左旋']
+    - say: 卸下叶轮平键
+      any: ['平键', '叶轮键']
+  evidence:
+    - quote: '拧松叶轮螺母末端的定位螺丝'
+
+- id: d4_proc_05
+  type: procedure
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 停用一段时间后重新投用，轴承要怎么处理？'
+  reference: '1. 使用轻质油冲洗轴承和轴承架，去除污垢，冲洗期间用手慢慢转动轴；2. 使用适合的润滑油冲洗轴承外壳，确保清洁后润滑油的质量；3. 按重新装配部分的说明进行正确的轴承润滑。'
+  facts:
+    - say: 用轻质油冲洗轴承和轴承架
+      any: ['轻质油']
+    - say: 冲洗期间用手慢慢转动轴
+      any: ['转动轴', '转动']
+  evidence:
+    - quote: '使用轻质油冲洗轴承和轴承架，去除污垢'
+
+- id: d4_table_00
+  type: table
+  doc: '4'
+  expect: answer
+  question: '按 Model 3700 手册，化学或危险液体溅入眼睛后应如何处理？'
+  reference: '1. 用手指强制分开眼皮；2. 用眼药水或自来水清洗眼睛，持续至少15分钟；3. 求医治疗。'
+  facts:
+    - say: 清洗至少 15 分钟
+      any: ['{n:15}分钟']
+      numeric: true
+    - say: 求医治疗
+      any: ['求医', '就医', '就诊', '医院', '治疗']
+  evidence:
+    - quote: '持续至少15分钟'
+
+- id: d4_table_01
+  type: table
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 做垂直校准的角度调整时，千分表读数为负说明什么？应如何调整？'
+  reference: '读数为负说明联轴在底部比顶部分得更开。执行以下步骤之一：添加垫片以提高轴端的驱动机的支脚；或取出垫片以降低另一端的驱动机的支脚。'
+  facts:
+    - say: 联轴在底部比顶部分得更开
+      any: ['底部.{0,8}分.{0,3}开']
+    - say: 添加垫片提高轴端驱动机支脚
+      any: ['(添加|加|增加)垫片']
+    - say: 或取出垫片降低另一端支脚
+      any: ['(取出|减少|去掉|减去)垫片']
+  evidence:
+    - quote: '联轴在底部比顶部分得更开'
+
+- id: d4_table_02
+  type: table
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 的 LX 轴承架需要加多少润滑油？'
+  reference: 'LX（与 XLA 相同）轴承架油量为2120毫升（72盎司）。'
+  facts:
+    - say: 2120 毫升（72 盎司）
+      any: ['{n:2120}(毫升|ml)', '{n:72}盎司']
+      numeric: true
+  evidence:
+    - quote: 'LX、XLA 2120 72'
+
+- id: d4_table_03
+  type: table
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 的抽吸管道上，泵入口法兰和最近的弯管之间至少要隔多远？'
+  reference: '距离至少为管道直径的五倍，以减少泵抽吸入口因乱流产生气穴的风险。'
+  facts:
+    - say: 至少为管道直径的五倍
+      any: ['(五|{n:5})倍']
+  evidence:
+    - quote: '至少为管道直径的五倍'
+
+- id: d4_table_04
+  type: table
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 采用外部冲洗的密封冲洗方式时，冲洗液的压力和注入速率有什么要求？'
+  reference: '冲洗液体的压力必须比密封腔的压力高出0.35到1.01 kg/cm²（5到15 psi）；注入速率必须介于2到8 lpm（0.5到2 gpm）。'
+  facts:
+    - say: 压力比密封腔高 0.35~1.01 kg/cm²（5~15 psi）
+      any: ['{n:0.35}.{0,3}{to}.{0,1}{n:1.01}', '{n:5}.{0,3}{to}.{0,1}{n:15}psi']
+      numeric: true
+    - say: 注入速率 2~8 lpm（0.5~2 gpm）
+      any: ['{n:2}.{0,3}{to}.{0,1}{n:8}.{0,1}[l1]pm', '{n:0.5}.{0,3}{to}.{0,1}{n:2}gpm']
+      numeric: true
+  evidence:
+    - quote: '冲洗液体的压力必须比密封腔的压力高出 0.35 到 1.01 kg/cm²'
+
+- id: d4_table_05
+  type: table
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 的叶轮叶片磨损到什么程度时需要更换叶轮？'
+  reference: '当凹槽深度大于1/16英寸（1.6毫米），或平均磨损大于1/32英寸（0.8毫米）时更换。'
+  facts:
+    - say: 凹槽深度大于 1/16 英寸（1.6 毫米）
+      any: ['{n:1.6}{mm}', '{n:1/16}{in}']
+      numeric: true
+    - say: 平均磨损大于 1/32 英寸（0.8 毫米）
+      any: ['{n:0.8}{mm}', '{n:1/32}{in}']
+      numeric: true
+  evidence:
+    - quote: '当凹槽深度大于1/16英寸（1.6毫米）'
+
+- id: d4_table_06
+  type: table
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 的 XLX 组应配用什么型号的径向轴承和止推轴承？'
+  reference: '径向（内置）轴承 6218 C3，止推（外侧）轴承 7317 BEGAM。'
+  facts:
+    - say: 径向轴承 6218 C3
+      any: ['{n:6218}']
+    - say: 止推轴承 7317 BEGAM
+      any: ['{n:7317}']
+  evidence:
+    - quote: 'XLX 6218 C3 7317 BEGAM'
+
+- id: d4_table_07
+  type: table
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 叶轮磨损环直径在 150 至 174.99 毫米之间时，最小直径间隙是多少？'
+  reference: '最小直径间隙为0.45毫米（0.018英寸）。'
+  facts:
+    - say: 0.45 毫米（0.018 英寸）
+      any: ['{n:0.45}{mm}', '{n:0.018}{in}']
+      numeric: true
+  evidence:
+    - quote: '150 至 174.99 0.018 0.45'
+
+- id: d4_table_08
+  type: table
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 的密封腔盖表面磨损、损坏或腐蚀到多深时需要更换？'
+  reference: '超过0.126英寸（3.2毫米）深时更换密封腔盖。'
+  facts:
+    - say: 超过 0.126 英寸（3.2 毫米）深
+      any: ['{n:3.2}{mm}', '{n:0.126}{in}']
+      numeric: true
+  evidence:
+    - quote: '如果磨损、损坏或腐蚀超过0.126英寸（3.2毫米）深'
+
+- id: d4_table_09
+  type: table
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 检查密封腔面伸出时，SA 组的最大允许总指示读数是多少？'
+  reference: 'SA 组最大允许总指示读数为0.0018英寸（0.045毫米）。'
+  facts:
+    - say: 0.0018 英寸（0.045 毫米）
+      any: ['{n:0.045}{mm}', '{n:0.0018}{in}']
+      numeric: true
+  evidence:
+    - quote: 'SA 0.0018英寸（0.045毫米）'
+
+- id: d4_table_10
+  type: table
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 泵壳螺栓（项目 356A）规格为 5/8 英寸时，最大扭矩是多少？'
+  reference: '176 Nm（130 英尺-磅）。'
+  facts:
+    - say: 176 Nm（130 英尺-磅）
+      any: ['{n:176}n', '{n:130}英尺']
+      numeric: true
+  evidence:
+    - quote: '176 Nm130英尺-磅'
+
+- id: d4_table_11
+  type: table
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 泵起动后又停止抽运，可能是什么原因，怎么解决？'
+  reference: '泵无法灌注——重新灌泵并检查泵和进气管是否充满液体；进气管中含有空气或气穴——重新调整管道以清除气泡；进气管漏气——维修泄漏部位。'
+  facts:
+    - say: 泵无法灌注，需重新灌泵
+      any: ['无法灌注', '重新灌泵', '灌注']
+    - say: 进气管中含有空气或气穴
+      any: ['气穴', '气泡', '含有空气']
+    - say: 进气管漏气
+      any: ['漏气']
+  evidence:
+    - quote: '进气管中含有空气或气穴'
+
+- id: d4_table_12
+  type: table
+  doc: '4'
+  expect: answer
+  question: '按 Model 3700 的故障排除表，轴承运转过热有哪些原因和解决方法？'
+  reference: '泵和驱动机校准不当——重新校准泵和驱动机；润滑不充分——检查润滑剂的适合性和液位；润滑冷却不当——检查冷却系统。'
+  facts:
+    - say: 泵和驱动机校准不当
+      any: ['校准不当', '重新校准']
+    - say: 润滑不充分
+      any: ['润滑不充分', '润滑剂的适合性', '液位']
+    - say: 润滑冷却不当
+      any: ['冷却']
+  evidence:
+    - quote: '润滑不充分'
+
+- id: d4_table_13
+  type: table
+  doc: '4'
+  expect: answer
+  question: 'Goulds 泵材料代码 2229 对应的是什么材料？'
+  reference: '316 不锈钢（ASTM A276 型 316）。'
+  facts:
+    - say: 316 不锈钢
+      any: ['{n:316}(不锈钢|ss)']
+  evidence:
+    - any_quote: ['316 不锈钢 2229 A276 型 316', '316SS 2229']
+
+- id: d4_table_14
+  type: table
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 的 ATEX 温度分类 T4 对应的最大允许表面温度是多少？'
+  reference: 'T4 的最大允许表面温度为275°F（135°C）。'
+  facts:
+    - say: 275°F（135°C）
+      any: ['{n:135}{C}', '{n:275}{F}', '275\(135\)']
+      numeric: true
+  evidence:
+    - quote: 'T4 275(135) 235(113)'
+
+- id: d4_table_15
+  type: table
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 的泵壳垫圈（项目 351）是什么材料？'
+  reference: '缠绕 316 不锈钢。'
+  facts:
+    - say: 缠绕 316 不锈钢
+      any: ['缠绕.{0,3}316']
+  evidence:
+    - quote: '垫圈，泵壳 1 缠绕 316 不锈钢'
+
+- id: d4_table_16
+  type: table
+  doc: '4'
+  expect: answer
+  question: 'ITT Goulds Pumps 亚太地区办公室的电话是多少？'
+  reference: '+65 627-63693。'
+  facts:
+    - say: 电话 +65 627-63693
+      any: ['65.{0,2}627.?63693']
+  evidence:
+    - quote: '+65 627-63693'
+
+- id: d4_table_17
+  type: table
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 采用公制单位的铭牌上，HYDRO PRESS 字段表示什么？'
+  reference: '表示在38°C时的静水压力，单位为每平方厘米的千克数。'
+  facts:
+    - say: 静水压力
+      any: ['静水压力']
+    - say: 在 38°C 时
+      any: ['{n:38}{C}']
+      numeric: true
+  evidence:
+    - quote: '在38°C时的静水压力'
+
+- id: d4_table_18
+  type: table
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 铭牌上的泵规格（例如 2x3-8）是按什么规则表示的？'
+  reference: '泵规格的计算公式：排放端 x 吸入端 - 标称最大叶轮直径，单位为英寸。'
+  facts:
+    - say: 排放端
+      any: ['排放端', '排出端', '出口']
+    - say: 吸入端
+      any: ['吸入端', '吸入口', '入口']
+    - say: 标称最大叶轮直径
+      any: ['叶轮直径']
+  evidence:
+    - quote: '排放端x吸入端-标称最大叶轮直径'
+
+- id: d4_cross_01
+  type: cross_chunk
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 的 SA 泵有几个油环？它的轴承架油量是多少？'
+  reference: 'SA 泵有一个油环；轴承架油量为600毫升（20盎司）。'
+  facts:
+    - say: SA 泵有一个油环
+      any: ['(一|1)个油环', '油环.{0,8}(一|1)个', '(一|1)个']
+    - say: 油量 600 毫升（20 盎司）
+      any: ['{n:600}(毫升|ml)', '{n:20}盎司']
+      numeric: true
+  evidence:
+    - any_quote: ['SA 和 MA 泵拥有一个油环', 'SA 和 MA 1', '油环（SA 和 MA 架） 1']
+    - quote: 'SA 600 20'
+
+- id: d4_cross_02
+  type: cross_chunk
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 对基础的重量有什么要求？准备基础安装时，基础顶部要削掉多少？'
+  reference: '基础的重量不得小于泵、驱动机、基板和附件总重的三倍；准备基础安装时，要削碎基础顶部最少25.0毫米（1.0英寸），以去除多孔或低强度混凝土。'
+  facts:
+    - say: 基础重量不小于总重的三倍
+      any: ['(三|{n:3})倍']
+    - say: 削碎基础顶部最少 25.0 毫米（1.0 英寸）
+      any: ['{n:25}{mm}', '{n:1}{in}']
+      numeric: true
+  evidence:
+    - quote: '基础的重量不得小于泵、驱动机、基板和附件总重的三倍'
+    - quote: '削碎基础顶部最少 25.0 毫米'
+
+- id: d4_cross_03
+  type: cross_chunk
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 的 XXL 组用什么型号的止推轴承？轴承架油量是多少？'
+  reference: '止推（外侧）轴承为 7318 BEGAM；轴承架油量为2625毫升（89盎司）。'
+  facts:
+    - say: 止推轴承 7318 BEGAM
+      any: ['{n:7318}']
+    - say: 油量 2625 毫升（89 盎司）
+      any: ['{n:2625}(毫升|ml)', '{n:89}盎司']
+      numeric: true
+  evidence:
+    - quote: 'XXL 6215 C3 7318 BEGAM'
+    - quote: 'XLX、XXL 2625 89'
+
+- id: d4_cross_04
+  type: cross_chunk
+  doc: '4'
+  expect: answer
+  question: 'Model 3700 的维护检查分哪几类？其中每三个月要做哪些检查？'
+  reference: '维护检查包括例行维护、例行检查、3个月检查和年度检查。每三个月：检查基础和固定螺栓是否紧固；如泵处于闲置，检查机械密封；更换润滑油（最少每3个月或2000运行小时一次）；需要时检查轴校准并重新对齐。'
+  facts:
+    - say: 包括例行维护
+      any: ['例行维护']
+    - say: 包括年度检查
+      any: ['年度检查']
+    - say: 检查基础和固定螺栓是否紧固
+      any: ['固定螺栓', '基础.{0,6}螺栓']
+    - say: 更换润滑油
+      any: ['润滑油']
+  evidence:
+    - quote: '维护进度包括以下类型的检查'
+    - quote: '检查基础和固定螺栓是否紧固'
+
+- id: d4_coll_01
+  type: colloquial
+  doc: '4'
+  expect: answer
+  question: '3700 这台泵的润滑油多久换一回？'
+  reference: '最少每3个月（2000运行小时）更换一次；新轴承在运行200小时后先换一次油。'
+  facts:
+    - say: 每 3 个月
+      any: ['{n:3}个月', '三个月']
+      numeric: true
+    - say: 或每 2000 运行小时
+      any: ['{n:2000}']
+      numeric: true
+  evidence:
+    - any_quote: ['最少每 3 个月（2000 运行小时）更换一次', '每 2000 运行小时或每3个月换油一次']
+
+- id: d4_coll_02
+  type: colloquial
+  doc: '4'
+  expect: answer
+  question: '装 3700 的轴承时，能不能拿火烤一下好装进去？'
+  reference: '不能。手册要求不要使用火把，也不要用蛮力；建议的方法是使用感应加热器加热轴承并消磁。'
+  facts:
+    - say: 不要使用火把
+      any: ['火把', '不(能|要|可|得).{0,8}火']
+    - say: 用感应加热器加热
+      any: ['感应加热器', '电感式加热器', '感应加热']
+  evidence:
+    - quote: '不要使用火把，并且不要用蛮力'
+
+- id: d4_coll_03
+  type: colloquial
+  doc: '4'
+  expect: answer
+  question: '3700 开起来以后压力半天上不去，该咋办？'
+  reference: '立即查看压力表；如果没有快速达到排放压力，应立即停止驱动机、重新灌注，然后再尝试重新启动泵。'
+  facts:
+    - say: 立即停止驱动机
+      any: ['停止驱动机', '停.{0,4}驱动机', '停机', '停泵']
+    - say: 重新灌注后再启动
+      any: ['重新灌', '再次灌']
+  evidence:
+    - any_quote: ['如果没有快速达到排放压力，请立即停止驱动机、重新灌注并尝试重新启动泵', '如果泵未达到正确压力，执行以下步骤']
+
+# ============================================================================ 跨手册
+
+- id: x_cross_01
+  type: cross_chunk
+  doc: ['1', '2']
+  expect: answer
+  question: 'D型泵分体安装时，泵联轴器与电机联轴器之间要保留多大间隙？Wilo-WR 爪型联轴器外径 80~140mm 时，端面间距又是多少？'
+  reference: 'D型泵分体安装时，将泵联轴器向电机侧拉到底后，与电机联轴器间再保留5~8mm间隙；Wilo-WR 爪型联轴器外径 80~140mm 时，端面间距 C 为 2~4mm。'
+  facts:
+    - say: D 型泵保留 5~8mm 间隙
+      any: ['{n:5}{to}{n:8}{mm}']
+      numeric: true
+    - say: Wilo-WR 间距 2~4mm
+      any: ['{n:2}{to}{n:4}{mm}']
+      numeric: true
+  evidence:
+    - quote: '与电机联轴器间再保留5~8mm间隙'
+      doc: '1'
+    - quote: '80~140mm 2~4mm'
+      doc: '2'
+
+# ============================================================================ 多轮追问（系统目前只收到最后一句）
+
+- id: mt_01
+  type: multi_turn
+  doc: '2'
+  expect: answer
+  history:
+    - {role: user, content: 'Wilo-WR 轴承室不带油嘴时，出厂加的润滑脂能用多久？'}
+    - {role: assistant, content: '出厂前已添加润滑脂，可使用约15000小时或2年；工况恶劣（如高温、潮湿）时，推荐在使用期结束前检查轴承并添加润滑脂。'}
+  question: '那带油嘴的呢？'
+  standalone: 'Wilo-WR 轴承室带油嘴时，多久加一次润滑脂，每次加多少？'
+  reference: '轴承室带油嘴时：出厂前已添加润滑脂；每6个月，每个油嘴需添加润滑脂20～30g；润滑脂过多会发热，添加不得超过轴承的一半。'
+  facts:
+    - say: 每 6 个月添加一次
+      any: ['{n:6}个月', '半年', '六个月']
+      numeric: true
+    - say: 每个油嘴 20～30g
+      any: ['{n:20}{to}{n:30}(g|克)']
+      numeric: true
+  evidence:
+    - quote: '每6个月，每个油嘴需添加润滑脂20～30g'
+
+- id: mt_02
+  type: multi_turn
+  doc: '1'
+  expect: answer
+  history:
+    - {role: user, content: 'D型泵不吸水，真空表显示高度真空，是什么原因？'}
+    - {role: assistant, content: '可能的原因：底阀没打开或已淤塞；吸水管路的阻力太大；吸水高度太高。'}
+  question: '要是压力表有压力，但就是不出水呢？'
+  standalone: 'D型泵不出水，但压力表显示有压力，可能是什么原因？'
+  reference: '原因：出水管路阻力太大；旋转方向不对；叶轮阻塞；转速不够。消除方法：检查或缩短出水管路；纠正电动机的旋转方向；清洗叶轮；检查电源电压，提高转速。'
+  facts:
+    - say: 出水管路阻力太大
+      any: ['出水管路.{0,6}阻力', '阻力(太|过)大']
+    - say: 旋转方向不对
+      any: ['旋转方向', '转向']
+    - say: 叶轮阻塞
+      any: ['叶轮(阻|堵)塞']
+    - say: 转速不够
+      any: ['转速不够', '转速.{0,4}(低|不足)']
+  evidence:
+    - quote: '泵不出水，压力表显示有压力'
+
+- id: mt_03
+  type: multi_turn
+  doc: '4'
+  expect: answer
+  history:
+    - {role: user, content: 'Model 3700 的 SA 组用什么型号的轴承？'}
+    - {role: assistant, content: 'SA 组径向（内置）轴承为 6210 C3，止推（外侧）轴承为 7310 BEGAM。'}
+  question: 'MX 组呢？'
+  standalone: 'Model 3700 的 MX 组用什么型号的径向轴承和止推轴承？'
+  reference: 'MX 组（与 LA 相同）径向（内置）轴承为 6213 C3，止推（外侧）轴承为 7312 BEGAM。'
+  facts:
+    - say: 径向轴承 6213 C3
+      any: ['{n:6213}']
+    - say: 止推轴承 7312 BEGAM
+      any: ['{n:7312}']
+  evidence:
+    - quote: 'MX、LA 6213 C3 7312 BEGAM'
+
+- id: mt_04
+  type: multi_turn
+  doc: '3'
+  expect: answer
+  history:
+    - {role: user, content: 'Leader Ecotronic 的红色 LED 指示灯闪烁是什么意思？'}
+    - {role: assistant, content: '红色 LED 指示灯闪烁表示缺水，恢复正常水流即可。'}
+  question: '如果是一直亮着不闪呢？'
+  standalone: 'Leader Ecotronic 的红色 LED 指示灯常亮是什么原因，怎么解决？'
+  reference: '红色 LED 指示灯常亮表示自动重置尝试次数超限；解决方法是断开并重新连接电源。'
+  facts:
+    - say: 自动重置尝试次数超限
+      any: ['重置.{0,8}超限', '尝试次数', '超限']
+    - say: 断开并重新连接电源
+      any: ['重新连接电源', '断开.{0,10}电源', '重新上电', '断电']
+  evidence:
+    - quote: '自动重置尝试次数超限'
+
+- id: mt_05
+  type: multi_turn
+  doc: '4'
+  expect: answer
+  history:
+    - {role: user, content: 'Model 3700 的 SA 轴承架油量是多少？'}
+    - {role: assistant, content: 'SA 轴承架油量为 600 毫升（20 盎司）。'}
+  question: '那应该加什么牌子的油？'
+  standalone: 'Model 3700 轴承润滑可接受的润滑油有哪些品牌和型号？'
+  reference: '可接受的润滑油：Exxon Teresstic EP 68；Mobil DTE 重介质；Sunoco Sunvis 968；Royal Purple SYNFILM ISO VG 68 合成润滑剂。'
+  facts:
+    - say: Exxon Teresstic EP 68
+      any: ['teresstic']
+    - say: Mobil DTE 重介质
+      any: ['dte']
+    - say: Sunoco Sunvis 968
+      any: ['sunvis']
+    - say: Royal Purple SYNFILM ISO VG 68
+      any: ['synfilm']
+  evidence:
+    - quote: 'Exxon Teresstic EP 68'
+
+- id: mt_06
+  type: multi_turn
+  doc: '2'
+  expect: answer
+  history:
+    - {role: user, content: 'Wilo-WR 管径 100mm 时，水泵允许的合力 ∑F 是多少？'}
+    - {role: assistant, content: '管径 100mm 时允许的合力 ∑F 为 160 daN。'}
+  question: '管径 200 的呢？'
+  standalone: 'Wilo-WR 管径 200mm 时，水泵允许的合力 ∑F 是多少？'
+  reference: '管径 200mm 时允许的合力 ∑F 为 315 daN。'
+  facts:
+    - say: ∑F 为 315 daN
+      any: ['{n:315}dan']
+      numeric: true
+  evidence:
+    - quote: '∑F 160 200 240 315'
+
+- id: mt_07
+  type: multi_turn
+  doc: '4'
+  expect: answer
+  history:
+    - {role: user, content: 'Model 3700 长期存放超过六个月，有什么存储要求？'}
+    - {role: assistant, content: '存放至遮荫的干燥地点，存放地点严禁热量、污垢和震动；至少每三个月用手转动轴几次。'}
+  question: '那要是只放一两个月呢？'
+  standalone: 'Model 3700 短期存放（少于六个月）有什么存储要求？'
+  reference: '短期（少于六个月）：存放至遮荫的干燥地点，存放地点严禁灰尘和震动。'
+  facts:
+    - say: 存放至遮荫的干燥地点
+      any: ['遮荫', '干燥']
+    - say: 严禁灰尘和震动
+      any: ['灰尘', '震动', '振动']
+  evidence:
+    - quote: '存放地点严禁灰尘和震动'
+
+- id: mt_08
+  type: multi_turn
+  doc: '4'
+  expect: answer
+  history:
+    - {role: user, content: 'Model 3700 叶轮磨损环直径 100 至 114.99 毫米时，最小直径间隙是多少？'}
+    - {role: assistant, content: '最小直径间隙为 0.38 毫米（0.015 英寸）。'}
+  question: '间隙大到什么程度就得换了？'
+  standalone: 'Model 3700 的磨损环直径间隙超过多少时需要更换磨损环？'
+  reference: '如果直径间隙超过表中显示的最小间隙的两倍，或者液压性能下降到无法接受的水平，就要更换磨损环。'
+  facts:
+    - say: 超过最小间隙的两倍
+      any: ['(两|二|2)倍']
+  evidence:
+    - quote: '如果直径间隙超过此表中显示的最小间隙的两倍'
+
+- id: mt_09
+  type: multi_turn
+  doc: '1'
+  expect: answer
+  history:
+    - {role: user, content: 'D型泵消耗的功率过大是什么原因？'}
+    - {role: assistant, content: '原因：填料压得太紧；叶轮与密封环磨擦；流量过大。'}
+  question: '要是流量不够、扬程也太低呢？'
+  standalone: 'D型泵流量不足或扬程太低，可能是什么原因，怎么消除？'
+  reference: '原因：叶轮或进水管路阻塞；密封环磨损过多，或叶轮损坏；转速低于规定值。消除方法：清洗叶轮或管路；更换损坏的零件；调整至额定转速。'
+  facts:
+    - say: 叶轮或进水管路阻塞
+      any: ['(阻|堵)塞']
+    - say: 密封环磨损过多或叶轮损坏
+      any: ['密封环磨损', '叶轮损坏', '磨损过多']
+    - say: 转速低于规定值
+      any: ['转速低于', '转速.{0,4}(低|不足|不够)', '额定转速']
+  evidence:
+    - quote: '流量不足或扬程太低'
+
+- id: mt_10
+  type: multi_turn
+  doc: '2'
+  expect: answer
+  history:
+    - {role: user, content: 'Wilo-WR 出水管路名义直径 100 时，轴封水量是多少？'}
+    - {role: assistant, content: '出水管路名义直径 100 时，轴封水量为 0.15 m³/h（高于出口压力 0.5bar）。'}
+  question: '直径 150 的呢？'
+  standalone: 'Wilo-WR 出水管路名义直径 150 时，轴封水量是多少？'
+  reference: '名义直径 125~200 的轴封水量为 0.20 m³/h（高于出口压力 0.5bar），直径 150 属于这一档。'
+  facts:
+    - say: 轴封水量 0.20 m³/h
+      any: ['{n:0.2}m3/h', '{n:0.2}立方']
+      numeric: true
+  evidence:
+    - quote: '125~200 0.20'
+
+# ============================================================================ 应拒答：相近领域，库里没有
+
+- {id: oos_adj_01, type: oos_adjacent, expect: refuse, question: '螺杆空压机排气温度过高怎么处理？', absent: [空压机, 压缩机]}
+- {id: oos_adj_02, type: oos_adjacent, expect: refuse, question: '挖掘机液压泵的工作压力一般是多少？', absent: [挖掘机]}
+- {id: oos_adj_03, type: oos_adjacent, expect: refuse, question: '离心风机轴承振动的允许值是多少？', absent: [风机]}
+- {id: oos_adj_04, type: oos_adjacent, expect: refuse, question: '减速机齿轮箱的润滑油多久更换一次？', absent: [减速机, 齿轮箱]}
+- {id: oos_adj_05, type: oos_adjacent, expect: refuse, question: '柴油发电机启动不了应该怎么排查？', absent: [柴油, 发电机]}
+- {id: oos_adj_06, type: oos_adjacent, expect: refuse, question: '变频器报过流故障怎么处理？', absent: [变频器, 过流]}
+- {id: oos_adj_07, type: oos_adjacent, expect: refuse, question: '皮带输送机跑偏怎么调整？', absent: [皮带, 输送机, 跑偏]}
+- {id: oos_adj_08, type: oos_adjacent, expect: refuse, question: '锅炉安全阀多久校验一次？', absent: [锅炉, 校验]}
+- {id: oos_adj_09, type: oos_adjacent, expect: refuse, question: '冷却塔风机的减速器漏油怎么办？', absent: [冷却塔, 减速器]}
+- {id: oos_adj_10, type: oos_adjacent, expect: refuse, question: '数控机床主轴轴承的预紧力怎么调整？', absent: [机床, 预紧力]}
+- {id: oos_adj_11, type: oos_adjacent, expect: refuse, question: '叉车液压油缸自动下沉是什么原因？', absent: [油缸, 下沉]}
+- {id: oos_adj_12, type: oos_adjacent, expect: refuse, question: '电动机的绝缘电阻低于多少就不能启动？', absent: [绝缘电阻]}
+- {id: oos_adj_13, type: oos_adjacent, expect: refuse, question: '罗茨真空泵的极限真空度是多少？', absent: [罗茨, 真空泵, 真空度]}
+- {id: oos_adj_14, type: oos_adjacent, expect: refuse, question: '隔膜计量泵的冲程怎么调节？', absent: [隔膜, 计量泵, 冲程]}
+
+# ============================================================================ 应拒答：与这些泵有关，但手册没写
+
+- id: oos_dom_01
+  type: oos_in_domain
+  expect: refuse
+  question: 'Model 3700 的保修期是多长时间？'
+  absent: [保修期, 质保]
+  note: 手册有担保范围、保修限制等章节，但没有写保修期限。
+- id: oos_dom_02
+  type: oos_in_domain
+  expect: refuse
+  question: 'Wilo-WR 系列多级离心泵的价格大概是多少？'
+  absent: [价格, 报价]
+- id: oos_dom_03
+  type: oos_in_domain
+  expect: refuse
+  question: 'D型多级离心泵的噪声限值是多少分贝？'
+  absent: [分贝, dB]
+- id: oos_dom_04
+  type: oos_in_domain
+  expect: refuse
+  question: 'Leader Ecojet 120 的额定功率是多少瓦？'
+  absent: [额定功率, 瓦]
+  absent_in: '3'
+- id: oos_dom_05
+  type: oos_in_domain
+  expect: refuse
+  question: 'Wilo-WR 配用电机的绝缘等级是什么？'
+  absent: [绝缘等级]
+  absent_in: '2'
+  note: 跨手册陷阱：只有 D 型泵手册写了电机绝缘等级（B / F），照搬过来即答错。
+- id: oos_dom_06
+  type: oos_in_domain
+  expect: refuse
+  question: 'D型多级离心泵的质保期是几年？'
+  absent: [质保, 保修期]
+- id: oos_dom_07
+  type: oos_in_domain
+  expect: refuse
+  question: 'Leader 离心泵的最大吸入深度是多少米？'
+  note: 手册故障表提到「超过最大吸入深度」，但没有给出数值。
+- id: oos_dom_08
+  type: oos_in_domain
+  expect: refuse
+  question: 'Model 3700 泵本体的重量是多少？'
+  note: 手册只要求基础重量不小于机组总重的三倍，没有给出泵的重量。
+- id: oos_dom_09
+  type: oos_in_domain
+  expect: refuse
+  question: 'Wilo-WR 多级泵的额定转速是多少？'
+  absent: [额定转速, 名义转速, r/min]
+  absent_in: '2'
+  note: 跨手册陷阱：D 型泵手册写了名义转速 2980/1480 r/min，Wilo-WR 手册没有。
+
+# ============================================================================ 应拒答：与设备无关
+
+- {id: oos_unr_01, type: oos_unrelated, expect: refuse, question: '今天上海的天气怎么样？'}
+- {id: oos_unr_02, type: oos_unrelated, expect: refuse, question: '帮我写一首关于春天的诗。'}
+- {id: oos_unr_03, type: oos_unrelated, expect: refuse, question: 'Python 里怎么读取 CSV 文件？'}
+- {id: oos_unr_04, type: oos_unrelated, expect: refuse, question: '个人所得税是怎么计算的？'}
+- {id: oos_unr_05, type: oos_unrelated, expect: refuse, question: '推荐几部好看的科幻电影。'}
+- {id: oos_unr_06, type: oos_unrelated, expect: refuse, question: '感冒了吃什么药好？'}
