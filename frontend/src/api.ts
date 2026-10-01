@@ -43,6 +43,16 @@ export type ChunkDetail = ChunkMeta & {
   table_html: string | null;
 };
 
+/** 回答里核对不上的一个数值 */
+export type NumberIssue = {
+  quantity: string;
+  /** no_source：本次的资料和问题里找不到这个数；unit_mismatch：资料里这个数的单位不是回答里写的单位 */
+  status: 'no_source' | 'unit_mismatch';
+  source_units: string[];
+  sentence: string;
+  detail: string;
+};
+
 export type Verification = {
   suspicious_count: number;
   suspicious: string[];
@@ -50,6 +60,10 @@ export type Verification = {
   fabricated_ids: string[];
   /** 后端判定的拒答（含拒答话术且没有引用任何片段）；rag 模式与旧会话记录没有该字段 */
   refused?: boolean;
+  /** agent 模式的数值核对：核对了几个数、最终答案里仍对不上的数、是否改写过（旧记录没有这些字段） */
+  numbers_checked?: number;
+  number_issues?: NumberIssue[];
+  repair?: { issues_before: number; issues_after: number; kept: 'repaired' | 'draft'; draft_issues?: string[] } | null;
 };
 
 export type Rejected = {
@@ -75,6 +89,8 @@ export type Done = {
   model_name?: string | null;
   /** 按 config llm_pricing 估算的本次费用（元） */
   cost_yuan?: number;
+  /** agent 模式：最终采用的答案（数值核对后可能经过改写；拒答会去掉引用），以它为准 */
+  answer?: string;
 };
 
 /** Agent 的步骤事件（step）：模型开始一次调用、工具开始/结束、中间轮次的说明文字、达到轮数上限 */
@@ -95,7 +111,9 @@ export type StepEvent =
       output?: string | null;
     }
   | { type: 'thought'; round: number; text: string }
-  | { type: 'forced_final'; round: number };
+  | { type: 'forced_final'; round: number }
+  /** 回答里的数值核对不上，接下来让模型改写一次（issues 是逐条说明） */
+  | { type: 'repair'; round: number; issues: string[] };
 
 /**
  * rag 模式：retrieval → (rejected | token* + verification + done) / error

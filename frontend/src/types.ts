@@ -19,7 +19,8 @@ export type AgentStep =
       output?: string | null;
     }
   | { kind: 'thought'; round: number; text: string }
-  | { kind: 'forced'; round: number };
+  | { kind: 'forced'; round: number }
+  | { kind: 'repair'; round: number; issues: string[] };
 
 export type Turn = {
   id: string;

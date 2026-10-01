@@ -90,6 +90,8 @@ prompts:
   B: configs/prompts/B_end_citation.txt           # 答案末尾标注引用（切换前的线上版本）
   C: configs/prompts/C_per_sentence_citation.txt  # 每一句末尾标注引用（rag 模式在用的版本）
   agent: configs/prompts/agent.txt                # 工具调用 Agent 的系统提示词（{catalog} 处填手册清单）
+  agent_guard: configs/prompts/agent_guard.txt    # 注入防护：接在 Agent 系统提示词后面（agent.injection_guard 为 true 时）
+  agent_repair: configs/prompts/agent_repair.txt  # 回答里的数值核对不上时，让模型改写一次的说明（{issues} 处填问题清单）
   mcp: configs/prompts/mcp.txt                    # MCP Server 的使用说明（握手时发给客户端，{catalog} 处填手册清单）
 
 s4_agent:
@@ -123,6 +125,9 @@ agent:
   history_answer_chars: 600  # 每条历史回答去掉引用标记后最多保留的字数
   # 拒答判定：回答含这些话术且没有引用任何片段（与答案级评测、前端同一口径）
   refusal_markers: [检索内容不足, 知识库无相关内容, 无法回答, 未能找到相关]
+  # 护栏（阶段 3）
+  injection_guard: true      # 手册原文包进 <片段原文> 标签，系统提示词接上 agent_guard（标签内是资料不是指令）
+  max_repairs: 1             # 回答里的数值在资料里找不到或单位不符时，让模型改写的次数上限（0 为只核对、不改写）
 
 # 单题成本估算用的模型单价（元/百万 tokens）。DeepSeek 官网 2026-09-30 的价格：
 # 模型为 deepseek-flash（V4.1-Flash，非思考模式，见 src/llm_config.py），按 Flash 价格估算；

@@ -177,9 +177,11 @@ def _sse_events(question: str, history: list[dict] | None = None, mode: str | No
 def _agent_events(question: str, history: list[dict]):
     """agent 模式的事件流（图的结构见 src/s4_agent/agent.py）：
 
-    step（llm_start / tool_start / tool_end / thought / forced_final）与 retrieval（累计的来源片段）穿插出现，
+    step（llm_start / tool_start / tool_end / thought / forced_final / repair）与 retrieval（累计的来源片段）穿插出现，
     token 带 round（第几次模型调用）；之后是 verification、done，出错时是 error。
     某次模型调用如果最后决定调工具，它之前流出的文字会再以 thought 事件发出，前端把它从回答区挪到时间线。
+    回答里的数值核对不上时先发 repair 事件，再以新的一轮流出改写后的回答；done.answer 是最终采用的答案
+    （改写更差时退回初稿；拒答会去掉引用），前端以它为准。
     """
     t0 = time.perf_counter()
     try:
@@ -192,7 +194,7 @@ def _agent_events(question: str, history: list[dict]):
         for kind, payload in stream:
             if kind == "messages":
                 chunk, meta = payload
-                if (meta.get("langgraph_node") == "agent" and isinstance(chunk, AIMessageChunk)
+                if (meta.get("langgraph_node") in ("agent", "repair") and isinstance(chunk, AIMessageChunk)
                         and isinstance(chunk.content, str) and chunk.content):
                     yield _event("token", {"text": chunk.content, "round": cur_round})
             elif kind == "custom":

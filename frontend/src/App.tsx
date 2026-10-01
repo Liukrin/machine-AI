@@ -174,6 +174,10 @@ export default function App() {
               } else if (d.type === 'forced_final') {
                 steps = [...steps, { kind: 'forced', round: d.round }];
                 patch({ steps });
+              } else if (d.type === 'repair') {
+                // 数值核对不上：接下来的一轮是改写后的回答（token 换了 round，回答区会自动换成新的一轮）
+                steps = [...steps, { kind: 'repair', round: d.round, issues: d.issues }];
+                patch({ steps });
               }
               break;
             }
@@ -196,7 +200,13 @@ export default function App() {
               break;
             case 'done':
               finished = true;
-              patch({ status: 'done', done: ev.data, thinking: false });
+              // agent 模式以后端最终采用的答案为准（改写更差时退回初稿、拒答去掉引用，与流式文字可能不同）
+              patch({
+                status: 'done',
+                done: ev.data,
+                thinking: false,
+                ...(typeof ev.data.answer === 'string' ? { answer: ev.data.answer } : {}),
+              });
               break;
             case 'error':
               finished = true;

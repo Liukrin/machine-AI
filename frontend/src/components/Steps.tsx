@@ -102,6 +102,24 @@ function StepRow({ step }: { step: AgentStep }) {
       </li>
     );
   }
+  if (step.kind === 'repair') {
+    return (
+      <li className="text-xs leading-5 text-amber-800">
+        <div className="flex items-start gap-2">
+          <IconAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+          <span className="min-w-0 flex-1">
+            <span className="font-medium">数值核对</span>
+            <span className="ml-1.5 text-amber-700">{step.issues.length} 处与资料对不上，让模型改写一次</span>
+            <ul className="mt-0.5 list-disc pl-4 text-amber-700/90">
+              {step.issues.map((t, i) => (
+                <li key={i}>{t}</li>
+              ))}
+            </ul>
+          </span>
+        </div>
+      </li>
+    );
+  }
   const tone =
     step.status === 'error' ? 'text-rose-700' : step.status === 'running' ? 'text-slate-500' : 'text-slate-700';
   return (

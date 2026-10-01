@@ -199,6 +199,17 @@ function AnswerFooter({ turn }: { turn: Turn }) {
   }[tone];
   const ToneIcon = tone === 'ok' ? IconShieldCheck : IconAlert;
 
+  // agent 模式的数值核对：回答里的数值能否在本次资料里找到、单位是否一致（rag 模式与旧记录没有）
+  const issues = v?.number_issues ?? [];
+  const checked = v?.numbers_checked ?? 0;
+  const repaired = v?.repair?.kept === 'repaired' ? '（改写过一次）' : '';
+  const numLabel =
+    checked > 0
+      ? issues.length > 0
+        ? { ok: false, text: `${issues.length} 个数值在资料里核对不上：${issues.map((i) => i.quantity).join('、')}` }
+        : { ok: true, text: `${checked} 个数值均在资料中核对到${repaired}` }
+      : null;
+
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(turn.answer);
@@ -216,6 +227,15 @@ function AnswerFooter({ turn }: { turn: Turn }) {
           <span className={`flex items-center gap-1.5 ${toneClass}`}>
             <ToneIcon className="h-4 w-4 shrink-0" />
             {label}
+          </span>
+        )}
+        {numLabel && (
+          <span
+            className={`flex items-center gap-1.5 ${numLabel.ok ? 'text-teal-700' : 'text-amber-700'}`}
+            title={issues.map((i) => i.detail).join('\n') || undefined}
+          >
+            {numLabel.ok ? <IconShieldCheck className="h-4 w-4 shrink-0" /> : <IconAlert className="h-4 w-4 shrink-0" />}
+            {numLabel.text}
           </span>
         )}
         <span className="ml-auto flex items-center gap-3 text-slate-400">

@@ -179,19 +179,26 @@ def compare(value: float, unit: str, limit_min: float | None, limit_max: float |
 # --------------------------------------------------------------------------- 原文数字
 _SUPERSCRIPT = {"²": "^2 ", "³": "^3 "}
 _SPLIT_DECIMAL = re.compile(r"(?<=\d)\.\s+(?=\d)")          # MinerU 把「2.5」拆成「2. 5」
-_LATEX = re.compile(r"\$[^$]*\$")
+_LATEX = re.compile(r"\$\$.*?\$\$|\$[^$]*\$", re.S)     # 块级公式 $$…$$ 先认，不然会被当成两对空的 $$
 _NUMBER = re.compile(r"(?<![\d.])\d+(?:\.\d+)?(?![\d]|\.\d)")
 
 
 def numbers_in_text(text: str) -> set[float]:
-    """原文里出现过的数值（宽松：同时按「2. 5」拆开与合并两种读法），用来核对限值是否真出自所引片段。"""
+    """原文里出现过的数值，用来核对限值、回答里的数是否真出自资料。
+
+    宽松读法，几种都收：MinerU 把「2.5」拆成的「2. 5」按拆开、合并两种读；「3,000」按千分位（3000）和
+    小数逗号（3.000，OCR 常把小数点认成逗号，如 Model 3700 磨损环间隙表）两种读。
+    """
     s = text or ""
     for a, b in _SUPERSCRIPT.items():
         s = s.replace(a, b)                                 # 「kg/cm²100 psig」不能并成 2100
     s = _LATEX.sub(lambda m: re.sub(r"(?<=\d) (?=[\d.])|(?<=\.) (?=\d)", "", m.group(0)), s)
     s = unicodedata.normalize("NFKC", s).replace("\\", "")
-    s = re.sub(r"<[^>]+>", " ", s)
+    # 只去掉真正的 HTML 标签（标签名以字母开头）。原先的 <[^>]+> 会把「<2.000 … >」这种比较写法之间的整段当成标签删掉
+    s = re.sub(r"</?[A-Za-z][^<>]*>", " ", s)
+    comma_decimal = re.sub(r"(?<=\d),(?=\d)", ".", s)
     s = re.sub(r"(?<=\d),(?=\d{3}(?!\d))", "", s)
     found = {round(float(x), 6) for x in _NUMBER.findall(s)}
     found |= {round(float(x), 6) for x in _NUMBER.findall(_SPLIT_DECIMAL.sub(".", s))}
+    found |= {round(float(x), 6) for x in _NUMBER.findall(comma_decimal)}
     return found

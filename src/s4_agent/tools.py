@@ -35,6 +35,7 @@ import numpy as np  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 
 from hybrid_retrieval import _load_ctx, build_search_text, tokenize  # noqa: E402
+from numcheck import Quantity, Source, ground, unit_id  # noqa: E402
 from tables import TableStore, table_rows  # noqa: E402
 from tool_schema import TOOL_ARGS, TOOL_LABEL, tool_specs  # noqa: E402,F401  agent.py 也从这里导入
 from units import UnitError, compare, convert, fmt, numbers_in_text, same_unit, unit_display  # noqa: E402
@@ -42,6 +43,7 @@ from units import UnitError, compare, convert, fmt, numbers_in_text, same_unit, 
 PREVIEW_CHARS = 100        # 前端来源卡片的预览长度
 TABLE_MAX_CHARS = 2000     # 检索结果里单个表格片段最多给模型看多少字，超出截断并提示改用 lookup_table
 SMALL_TABLE_ROWS = 6       # 查表命中小表（不超过这么多行）时整表返回：竖排的小表单看一行没有意义
+SOURCE_TAG = "片段原文"     # 注入防护：手册原文包在 <片段原文 id="…"> … </片段原文> 里，提示词说明标签内是资料不是指令
 
 
 # --------------------------------------------------------------------------- 结果
@@ -129,6 +131,14 @@ def get_corpus() -> Corpus:
     return Corpus((cfg.get("s5_app") or {}).get("documents") or {})
 
 
+@lru_cache(maxsize=2048)
+def chunk_source(cid: str) -> Source:
+    """一个片段作为核对数值用的资料：说明行 + 正文（表格按行展开，与给模型看的写法相同）。"""
+    corpus = get_corpus()
+    c = corpus.by_id[cid]
+    return Source(f"{corpus.header(c)}\n{corpus.body(c)}")
+
+
 # --------------------------------------------------------------------------- 检索
 def hybrid_search(query: str, top_k: int, doc_id: str | None = None,
                   kind: str | None = None) -> tuple[list[str], dict[str, float], float | None]:
@@ -180,21 +190,57 @@ class Toolbox:
     片段再次出现时，full 只给一行「前面已给出全文」，head 只给一行提示，rows 照常给正文。
     abbreviate=False 时不做这种省略，重复出现的片段也给出正文：MCP 客户端自己管理上下文，
     之前给过的全文可能已被压缩掉（见 src/s5_app/mcp_server.py）。
+
+    context 是用户的问题（Agent 模式下含对话历史里的提问；MCP 拿不到，为 None），calc 是之前换算、核对工具的输出。
+    换算、核对的参数要对得上这些资料（numcheck.ground）：数值出现在原文里时，单位必须与原文一致；
+    Agent 模式下被换算值、被核对值还必须出自问题、片段或之前的换算结果（MCP 无从核对，只查单位）。
     """
 
-    def __init__(self, cfg: dict, tau: float, seen: dict[str, dict] | None = None, abbreviate: bool = True):
+    def __init__(self, cfg: dict, tau: float, seen: dict[str, dict] | None = None, abbreviate: bool = True,
+                 context: str | None = None, calc: list[str] | None = None):
         self.cfg = cfg
         self.tau = tau
         self.abbreviate = abbreviate
+        self.guard = bool(cfg.get("injection_guard", True))
+        self.context = context
+        self.calc: list[str] = list(calc or [])
         self.corpus = get_corpus()
         self.seen: dict[str, dict] = {cid: dict(v) for cid, v in (seen or {}).items()}
 
     def fork(self) -> "Toolbox":
         """副本：工具在副本上执行，按时完成才并回（run_tool），超时还在跑的线程改不到证据池。"""
-        return Toolbox(self.cfg, self.tau, self.seen, self.abbreviate)
+        return Toolbox(self.cfg, self.tau, self.seen, self.abbreviate, self.context, self.calc)
 
     def merge(self, other: "Toolbox") -> None:
         self.seen.update(other.seen)
+        self.calc = list(other.calc)
+
+    # ---- 参数核对：数值、单位对得上资料（规则见 numcheck.py）
+    def _sources(self, chunk_ids: list[str] | None = None) -> list[Source]:
+        out = [Source(self.context)] if self.context else []
+        out += [chunk_source(cid) for cid in (self.seen if chunk_ids is None else chunk_ids) if cid in self.corpus.by_id]
+        return out + [Source(t, kind="calc") for t in self.calc]
+
+    def _grounding_error(self, what: str, value: float, unit: str, chunk_ids: list[str] | None = None,
+                         require_found: bool = False) -> str | None:
+        uid = unit_id(unit)
+        if uid is None:                     # 不认识的单位：交给换算本身报错
+            return None
+        f = ground(Quantity(float(value), fmt(value), unit, uid), self._sources(chunk_ids))
+        if f.status == "unit_mismatch":
+            return (f"{what} {fmt(value)} 在原文里的单位是 {'、'.join(f.source_units)}，不是「{unit}」。单位请照抄原文"
+                    "（原文写的单位换算工具不认识时，说明原文单位后作答，不要换成别的单位），请核对后重试")
+        if f.status == "no_source" and require_found:
+            return (f"{what} {fmt(value)} 在问题、本次检索到的片段和之前的换算结果里都找不到。"
+                    "数值必须照抄这些地方写明的数，不要自己估算或心算换算，请核对后重试")
+        return None
+
+    def _wrap(self, cid: str, body: str) -> str:
+        """注入防护：原文包进标签；原文里伪造的同名标签改成全角，起不了作用。"""
+        if not self.guard:
+            return body
+        body = body.replace(f"<{SOURCE_TAG}", f"＜{SOURCE_TAG}").replace(f"</{SOURCE_TAG}", f"＜/{SOURCE_TAG}")
+        return f'<{SOURCE_TAG} id="{cid}">\n{body}\n</{SOURCE_TAG}>'
 
     def _mark(self, cid: str, distance: float | None, shown: str, new: list[dict]) -> None:
         """记进证据池（新片段同时记进 new）；shown 只升不降：看过全文的片段，之后再查到几行也还算看过全文。"""
@@ -220,7 +266,7 @@ class Toolbox:
             body = body[:TABLE_MAX_CHARS] + "\n……（表格较长，已截断；要查具体行请用 lookup_table）"
             part = "head"
         self._mark(cid, distance, part, new)
-        return f"[{cid}] {self.corpus.header(c)}{dist}\n{body}"
+        return f"[{cid}] {self.corpus.header(c)}{dist}\n{self._wrap(cid, body)}"
 
     def search_manuals(self, query: str, manual: str | None = None, kind: str | None = None) -> ToolResult:
         doc_id = self.corpus.resolve_manual(manual)
@@ -270,7 +316,7 @@ class Toolbox:
             c = self.corpus.by_id[cid]
             n_rows = self.corpus.tables.n_rows_of(cid)
             self._mark(cid, None, "full" if n_rows <= SMALL_TABLE_ROWS else "rows", new)
-            lines = [f"[{cid}] {self.corpus.header(c)}（共 {n_rows} 行）"]
+            lines: list[str] = []
             if n_rows <= SMALL_TABLE_ROWS:          # 小表整表给出
                 lines += [f"  {' | '.join(r)}" for r in table_rows(c["table_html"])]
                 shown += len(rows)
@@ -280,7 +326,7 @@ class Toolbox:
                 take = rows[: limit - shown]
                 lines += [f"  第 {h['row_idx'] + 1} 行：{' | '.join(h['cells'])}" for h in take]
                 shown += len(take)
-            parts.append("\n".join(lines))
+            parts.append(f"[{cid}] {self.corpus.header(c)}（共 {n_rows} 行）\n" + self._wrap(cid, "\n".join(lines)))
         more = sum(len(r) for r in groups.values()) - shown
         tail = []
         if more > 0:
@@ -311,10 +357,14 @@ class Toolbox:
             out = convert(value, from_unit, to_unit, is_difference=is_difference)
         except UnitError as exc:
             return _error(str(exc))
+        err = self._grounding_error("被换算的数值", value, from_unit, require_found=self.context is not None)
+        if err:
+            return _error(err)
         a = f"{fmt(value)} {unit_display(from_unit)}"
         b = f"{fmt(out)} {unit_display(to_unit)}"
         kind = "（温差）" if is_difference else ""
-        content = f"换算结果{kind}：{a} = {b}（精确值 {out:.6g}）"
+        content = f"换算结果{kind}：{a} = {b}（精确值 {out:.6g} {unit_display(to_unit)}）"
+        self.calc.append(content)
         return ToolResult(True, content, f"{a} = {b}",
                           data={"value": value, "from_unit": from_unit, "to_unit": to_unit, "result": out,
                                 "display": b, "is_difference": is_difference})
@@ -334,6 +384,13 @@ class Toolbox:
             r = compare(value, unit, limit_min, limit_max, limit_unit)
         except UnitError as exc:
             return _error(str(exc))
+        for lim in (x for x in (limit_min, limit_max) if x is not None):
+            err = self._grounding_error("限值", lim, limit_unit or unit, [source_chunk_id])
+            if err:
+                return _error(err)
+        err = self._grounding_error("被核对值", value, unit, require_found=self.context is not None)
+        if err:
+            return _error(err)
         lu = r["limit_unit"]
         rng = " ~ ".join([fmt(limit_min) if limit_min is not None else "", fmt(limit_max) if limit_max is not None else ""])
         if limit_min is None:
@@ -349,6 +406,7 @@ class Toolbox:
             pct = f"（{r['margin_pct']:.1f}%）" if r["margin_pct"] is not None else ""
             lines.append(f"差值：{word} {fmt(r['margin'])} {lu}{pct}")
         lines.append("请按上面的核对结论回答，不要自行重新比较。")
+        self.calc.append("\n".join(lines))
         return ToolResult(True, "\n".join(lines), f"{fmt(value)} {r['unit']} → {r['verdict_cn']}",
                           data={**r, "source_chunk_id": source_chunk_id})
 
