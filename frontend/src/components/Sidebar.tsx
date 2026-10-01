@@ -128,7 +128,7 @@ function KnowledgeBaseCard({ health, healthError }: { health: Health | null; hea
           </div>
         ) : (
           <div className="mt-2 text-[11px] leading-5 text-slate-400">
-            {healthError ? '请先启动后端服务（端口 8000）' : '正在连接后端…'}
+            {healthError ? '连不上后端，几秒后自动重试；没启动的话先启动后端（端口 8000）' : '正在连接后端…'}
           </div>
         )}
       </div>

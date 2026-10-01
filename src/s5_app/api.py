@@ -12,9 +12,13 @@ done 事件带 finish_reason，值为 "length" 时表示回答被 max_tokens 截
 
 服务启动时预加载 embedding 模型、BM25、jieba 词典、表格行库和 Agent 图（_warm_up），首个请求不用再等加载。
 
+每次 /api/ask 写一行请求日志（SQLite，见 request_log.py）；结束事件（done / rejected / error）带 request_id，
+前端的 👍/👎 凭它写回同一行。评测脚本直接调用 _sse_events，不经过日志。
+
 接口：
     GET  /api/health             健康检查（含知识库文档清单、默认模式）
     POST /api/ask                SSE 流式问答
+    POST /api/feedback           对某次回答的 👍/👎（可附一句说明）
     GET  /api/chunks/{chunk_id}  单个 chunk 完整内容（前端来源详情按需拉取）
 
 用法：
@@ -35,6 +39,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "src" / "s4_agent"))
 sys.path.insert(0, str(ROOT / "src" / "s3_eval"))
+sys.path.insert(0, str(ROOT / "src" / "s5_app"))
 
 import numpy as np  # noqa: E402
 import yaml  # noqa: E402
@@ -44,17 +49,19 @@ from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 from sse_starlette.sse import EventSourceResponse  # noqa: E402
+from starlette.concurrency import iterate_in_threadpool  # noqa: E402
 
 from langchain_core.messages import AIMessageChunk, HumanMessage, SystemMessage  # noqa: E402
 from llm_config import LLM_CONFIG, get_llm  # noqa: E402
 from graph import MAX_TOKENS, SYSTEM_PROMPT, TAU_DISTANCE, retrieve, verify_node  # noqa: E402
-from agent import CFG as AGENT_CFG, build_agent_graph, estimate_cost, initial_state  # noqa: E402
+from agent import CFG as AGENT_CFG, build_agent_graph, estimate_cost, initial_state, is_refusal  # noqa: E402
 from tools import get_corpus, hybrid_search  # noqa: E402
 from hybrid_retrieval import (  # noqa: E402
     _load_ctx,
     build_search_text,
     vector_top1_distance,
 )
+from request_log import RequestLog, new_request_id, now  # noqa: E402
 
 PREVIEW_CHARS = 100       # retrieval 事件里 preview 截断长度
 REJECT_REASON = "知识库无相关内容"
@@ -62,6 +69,10 @@ REJECT_REASON = "知识库无相关内容"
 
 def _config() -> dict:
     return yaml.safe_load((ROOT / "configs" / "config.yaml").read_text(encoding="utf-8"))
+
+
+_log_path = (_config().get("s5_app") or {}).get("request_log")
+REQUEST_LOG = RequestLog(ROOT / _log_path if _log_path else None)
 
 
 @asynccontextmanager
@@ -304,6 +315,58 @@ def _rag_events(question: str):
         yield _event("error", {"message": f"{type(exc).__name__}: {exc}"})
 
 
+_END_EVENTS = {"done": "done", "rejected": "rejected", "error": "error"}   # 结束事件 → 日志里的 status
+
+
+async def _logged(rid: str, question: str, history: list[dict], mode: str | None, events):
+    """包在事件流外面：结束事件里加上 request_id（前端反馈时带回）；流结束后写一行请求日志。
+
+    写成异步生成器、自己在线程池里逐个取同步事件流：客户端中途断开时 sse-starlette 取消的就是这里，
+    finally 一定执行，status 记为 aborted（等手头这一步，如一次模型调用，跑完才生效）。
+    若直接把同步生成器交给 sse-starlette，它被取消的是外面那层包装，同步生成器一直不被关闭，断开的请求记不下来。
+    日志写失败只打印警告，不影响回答。
+    """
+    t0 = time.perf_counter()
+    row: dict = {"id": rid, "created_at": now(), "mode": mode or str(AGENT_CFG["default_mode"]), "question": question,
+                 "history_turns": sum(1 for h in history if h.get("role") == "user"), "status": "aborted"}
+    parts: list[str] = []
+    try:
+        async for ev in iterate_in_threadpool(events):
+            name = ev["event"]
+            if name == "token":
+                parts.append(json.loads(ev["data"]).get("text") or "")
+            elif name == "retrieval":
+                row["sources"] = [c["chunk_id"] for c in json.loads(ev["data"])["chunks"]]
+            elif name == "verification":
+                v = json.loads(ev["data"])
+                row.update(cited=v.get("cited_ids"), fabricated=len(v.get("fabricated_ids") or []),
+                           refused=v.get("refused"), numbers_checked=v.get("numbers_checked"),
+                           number_issues=len(v["number_issues"]) if "number_issues" in v else None,
+                           repaired=(v.get("repair") or {}).get("kept"))
+            elif name in _END_EVENTS:
+                data = json.loads(ev["data"])
+                row["status"] = _END_EVENTS[name]
+                if name == "done":
+                    # agent 模式以 done.answer 为准（可能经过改写；token 里还混着调用工具前的说明）；rag 模式只有流式文字
+                    answer = data["answer"] if isinstance(data.get("answer"), str) else "".join(parts).strip()
+                    row.update({k: data.get(k) for k in ("elapsed_ms", "llm_calls", "tool_calls", "input_tokens",
+                                                         "output_tokens", "cost_yuan", "finish_reason", "model_name")},
+                               mode=data.get("mode") or row["mode"], answer=answer)
+                    if row.get("refused") is None:      # rag 模式的 verification 没有拒答判定，按同一口径补上
+                        row["refused"] = is_refusal(answer)
+                elif name == "error":
+                    row["error"] = data.get("message")
+                ev = _event(name, {**data, "request_id": rid})
+            yield ev
+    finally:
+        # 被取消时不能再 await，同步写（本地 SQLite，毫秒级）；没有 done 事件的（拒答闸、出错、断开）记墙钟耗时
+        row.setdefault("elapsed_ms", int((time.perf_counter() - t0) * 1000))
+        try:
+            REQUEST_LOG.record(row)
+        except Exception as exc:  # noqa: BLE001  日志是旁路，坏了不能拖垮问答
+            print(f"请求日志写入失败：{type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+
+
 def _warm_up() -> None:
     """启动时预加载，并空跑一次检索（触发 embedding 模型、Chroma、BM25、jieba 词典的加载）。不调用大模型。
 
@@ -327,6 +390,12 @@ class AskRequest(BaseModel):
     # 本会话之前的问答（前端按时间顺序传来）；agent 模式只取最近 config agent.history_turns 轮
     history: list[HistoryItem] = Field(default_factory=list, max_length=40)
     mode: Literal["agent", "rag"] | None = None
+
+
+class FeedbackRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=64)
+    rating: Literal[1, -1] | None      # 1 👍，-1 👎，null 撤销
+    comment: str | None = Field(None, max_length=500)
 
 
 @app.get("/api/health")
@@ -360,7 +429,19 @@ def chunk_detail(chunk_id: str) -> dict:
 @app.post("/api/ask")
 def ask(req: AskRequest):
     history = [h.model_dump() for h in req.history]
-    return EventSourceResponse(_sse_events(req.question, history, req.mode))
+    events = _sse_events(req.question, history, req.mode)
+    if REQUEST_LOG.enabled:
+        events = _logged(new_request_id(), req.question, history, req.mode, events)
+    return EventSourceResponse(events)
+
+
+@app.post("/api/feedback")
+def feedback(req: FeedbackRequest) -> dict:
+    if not REQUEST_LOG.enabled:
+        raise HTTPException(status_code=503, detail="请求日志没有开启（config s5_app.request_log），反馈无处记录")
+    if not REQUEST_LOG.feedback(req.request_id, req.rating, req.comment):
+        raise HTTPException(status_code=404, detail=f"没有这次问答的记录：{req.request_id}")
+    return {"ok": True}
 
 
 if __name__ == "__main__":

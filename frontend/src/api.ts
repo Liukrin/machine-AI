@@ -70,6 +70,8 @@ export type Rejected = {
   reason: string;
   top1_distance: number;
   tau: number;
+  /** 请求日志里的编号（日志开启时才有），👍/👎 凭它写回 */
+  request_id?: string;
 };
 
 export type Done = {
@@ -91,7 +93,12 @@ export type Done = {
   cost_yuan?: number;
   /** agent 模式：最终采用的答案（数值核对后可能经过改写；拒答会去掉引用），以它为准 */
   answer?: string;
+  /** 请求日志里的编号（日志开启时才有），👍/👎 凭它写回 */
+  request_id?: string;
 };
+
+/** 用户对一次回答的评价：1 有帮助，-1 没帮助 */
+export type Rating = 1 | -1;
 
 /** Agent 的步骤事件（step）：模型开始一次调用、工具开始/结束、中间轮次的说明文字、达到轮数上限 */
 export type StepEvent =
@@ -126,7 +133,7 @@ export type StreamEvent =
   | { event: 'token'; data: { text: string; round?: number } }
   | { event: 'verification'; data: Verification }
   | { event: 'done'; data: Done }
-  | { event: 'error'; data: { message: string } };
+  | { event: 'error'; data: { message: string; request_id?: string } };
 
 export type HistoryMessage = { role: 'user' | 'assistant'; content: string };
 
@@ -134,6 +141,16 @@ export async function fetchHealth(): Promise<Health> {
   const res = await fetch('/api/health');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
+}
+
+/** 👍/👎 写回请求日志；rating 为 null 表示撤销。comment 只在 👎 时有意义。 */
+export async function sendFeedback(requestId: string, rating: Rating | null, comment?: string): Promise<void> {
+  const res = await fetch('/api/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ request_id: requestId, rating, comment: comment || null }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 
 const chunkCache = new Map<string, Promise<ChunkDetail>>();

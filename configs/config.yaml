@@ -141,6 +141,9 @@ s5_app:
   # 允许跨域的前端地址（开发时前端走 Vite 代理、同源访问，用不到；直接从其他端口访问 API 时才需要）
   cors_origins:
     - http://localhost:5173
+  # 请求日志（SQLite，src/s5_app/request_log.py）：每次 /api/ask 一行，前端 👍/👎 写回同一行；置空则不记录。
+  # 目录不入库；Docker 部署时是 request-logs 卷。汇总：python scripts/log_report.py
+  request_log: logs/requests.db
   # 前端展示用的文档信息（来源卡片、知识库范围）；key 为 doc_id（= data/raw_pdf 下的文件名）
   #   title 完整名称（来源详情）；short 简称（来源卡片）；sample 自造示例手册，前端会显式标注
   documents:

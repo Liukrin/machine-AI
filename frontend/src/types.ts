@@ -1,4 +1,4 @@
-import type { ChunkRef, Done, Mode, Rejected, Verification } from './api';
+import type { ChunkRef, Done, Mode, Rating, Rejected, Verification } from './api';
 
 export type TurnStatus = 'retrieving' | 'generating' | 'done' | 'rejected' | 'error' | 'stopped';
 
@@ -40,6 +40,10 @@ export type Turn = {
   done: Done | null;
   error: string | null;
   createdAt: number;
+  /** 后端请求日志里的编号（日志开启时 done / rejected 事件带回；旧记录没有，不显示 👍/👎） */
+  requestId?: string;
+  /** 用户的评价（已写回后端） */
+  feedback?: { rating: Rating; comment?: string };
 };
 
 export type Session = {

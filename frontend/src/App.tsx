@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { askStream, fetchHealth, type ChunkRef, type Health, type HistoryMessage, type Mode } from './api';
+import {
+  askStream,
+  fetchHealth,
+  sendFeedback,
+  type ChunkRef,
+  type Health,
+  type HistoryMessage,
+  type Mode,
+  type Rating,
+} from './api';
 import { Composer } from './components/Composer';
 import { Sidebar } from './components/Sidebar';
 import { SourceDrawer } from './components/SourceDrawer';
@@ -48,11 +57,31 @@ export default function App() {
     sessionsRef.current = sessions;
   }, [sessions]);
 
-  // 这里只做幂等的读取：StrictMode 下 effect 会执行两次，会话在首次提问时才创建
+  // 这里只做幂等的读取：StrictMode 下 effect 会执行两次，会话在首次提问时才创建。
+  // 连不上就隔几秒重试（1、2、4…最长 10 秒）：前后端同时启动时，后端还在预加载模型，第一次检查必然失败
   useEffect(() => {
-    fetchHealth()
-      .then(setHealth)
-      .catch((e) => setHealthError(String(e)));
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let delay = 1000;
+    const check = () => {
+      fetchHealth()
+        .then((h) => {
+          if (stopped) return;
+          setHealth(h);
+          setHealthError(null);
+        })
+        .catch((e) => {
+          if (stopped) return;
+          setHealthError(String(e));
+          timer = setTimeout(check, delay);
+          delay = Math.min(delay * 2, 10_000);
+        });
+    };
+    check();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -183,7 +212,7 @@ export default function App() {
             }
             case 'rejected':
               finished = true;
-              patch({ status: 'rejected', rejected: ev.data });
+              patch({ status: 'rejected', rejected: ev.data, requestId: ev.data.request_id });
               break;
             case 'token': {
               const r = ev.data.round ?? 0;
@@ -205,6 +234,7 @@ export default function App() {
                 status: 'done',
                 done: ev.data,
                 thinking: false,
+                requestId: ev.data.request_id,
                 ...(typeof ev.data.answer === 'string' ? { answer: ev.data.answer } : {}),
               });
               break;
@@ -234,6 +264,20 @@ export default function App() {
   );
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
+
+  // 👍/👎：先写回后端，成功了再记到本地会话里（失败时抛给按钮显示）。不改会话的更新时间，免得侧栏顺序跳动
+  const giveFeedback = useCallback(async (turn: Turn, rating: Rating | null, comment?: string) => {
+    if (!turn.requestId) return;
+    await sendFeedback(turn.requestId, rating, comment);
+    const feedback = rating ? { rating, comment: comment || undefined } : undefined;
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.turns.some((t) => t.id === turn.id)
+          ? { ...s, turns: s.turns.map((t) => (t.id === turn.id ? { ...t, feedback } : t)) }
+          : s,
+      ),
+    );
+  }, []);
 
   const newChat = () => {
     setActiveId(null);
@@ -282,7 +326,7 @@ export default function App() {
           ) : (
             <div className="mx-auto max-w-3xl space-y-10 px-4 pb-6 pt-8">
               {turns.map((t) => (
-                <TurnView key={t.id} turn={t} onOpenSource={openSourceDrawer} onRetry={ask} />
+                <TurnView key={t.id} turn={t} onOpenSource={openSourceDrawer} onRetry={ask} onFeedback={giveFeedback} />
               ))}
             </div>
           )}

@@ -10,6 +10,9 @@ chroma_db/
 .claude/launch.json
 models/
 *.pkl
+# 请求日志（SQLite，含用户的提问）
+logs/
+.pytest_cache/
 requirements.lock.txt
 docs/resume_bullets.md
 # 307KB 检索缓存，本地可重建（--rebuild-cache），不入库

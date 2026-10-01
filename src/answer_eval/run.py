@@ -8,6 +8,7 @@
     python src/answer_eval/run.py --split dev      # 只评 dev（调试评测脚本、迭代系统时用）
     python src/answer_eval/run.py --run agent-v1   # 系统改动后换个评测名，结果放到单独目录，便于前后对比
     python src/answer_eval/run.py --reuse          # 只用缓存重算指标与报告，零 LLM 调用
+    python src/answer_eval/run.py --reuse --check  # 只复算、与已有 metrics.json 比对，不写文件（pytest 用它核对已提交的评测）
     python src/answer_eval/run.py --ids d2_cross_01,mt_03   # 只评指定题目（调试用）
     python src/answer_eval/run.py --no-judge       # 跳过评审模型，只出确定性指标
     python src/answer_eval/run.py --set tasks      # 换一个评测集（Agent 多步任务集，见 config answer_eval.sets）
@@ -63,6 +64,16 @@ def recorded_judge_model(set_dir: Path) -> str | None:
     return name if name and name != "未运行" else None
 
 
+def _diff(old, new, path: str = "") -> list[str]:
+    """两份 JSON 的差异（字典逐键递归，其余整体比较）。"""
+    if isinstance(old, dict) and isinstance(new, dict):
+        out: list[str] = []
+        for k in sorted(set(old) | set(new), key=str):
+            out += _diff(old.get(k, "<缺>"), new.get(k, "<缺>"), f"{path}.{k}" if path else str(k))
+        return out
+    return [] if old == new else [f"{path}：{old!r} → {new!r}"]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="答案级评测（一条命令）")
     ap.add_argument("--run", default="", help="评测名（结果目录名）；默认读 config answer_eval.run")
@@ -73,6 +84,8 @@ def main() -> None:
     ap.add_argument("--frozen", action="store_true",
                     help="系统输出只用缓存（按 system.json 记录的指纹），评审模型照常调用")
     ap.add_argument("--force", action="store_true", help="忽略缓存，全部重新调用系统")
+    ap.add_argument("--check", action="store_true",
+                    help="与 --reuse 同用：只复算，与已有的 metrics.json 逐项比对，不写任何文件；不一致时非零退出")
     ap.add_argument("--no-judge", action="store_true", help="跳过评审模型")
     ap.add_argument("--set", default="main", help="评测集：main（默认）或 config answer_eval.sets 下的名字")
     ap.add_argument("--mode", choices=["agent", "rag"], default=None,
@@ -80,6 +93,8 @@ def main() -> None:
     args = ap.parse_args()
     if (args.reuse or args.frozen) and args.force:
         raise SystemExit("--reuse / --frozen 与 --force 互斥。")
+    if args.check and not args.reuse:
+        raise SystemExit("--check 要与 --reuse 同用（只用缓存复算）。")
     cached_only = args.reuse or args.frozen
 
     import selfcheck
@@ -117,6 +132,8 @@ def main() -> None:
     run_dir = ROOT / acfg["out_dir"] / run_name
     set_dir = run_dir / es["subdir"] if es["subdir"] else run_dir
     sys_path = run_dir / "system.json"
+    if args.check and not sys_path.exists():
+        raise SystemExit(f"没有这次评测的记录：{sys_path}")
     if cached_only and sys_path.exists():
         # 只用缓存的系统输出：系统身份以当时记录的指纹为准（代码后来改过也不影响）
         system = json.loads(sys_path.read_text(encoding="utf-8"))
@@ -181,7 +198,8 @@ def main() -> None:
         t0 = time.perf_counter()
         for (s, field), result in zip(targets, run_jobs(jobs, int(acfg["judge"]["concurrency"]))):
             s[field] = result
-        judge.save(prune=(args.split == "all" and not partial))
+        if not args.check:
+            judge.save(prune=(args.split == "all" and not partial))
         print(f"评审完成：新调用 {judge.n_calls} 次，复用缓存 {judge.n_cached} 次，"
               f"用时 {time.perf_counter() - t0:.0f} 秒")
     for s in scores:
@@ -197,6 +215,19 @@ def main() -> None:
                             f"输出 {pricing['output']} 元/百万 tokens"}
     L, metrics = build_report(scores, by_id, split, splits, meta)
     suffix = "_partial" if partial else ("" if args.split == "all" else f"_{args.split}")
+    if args.check:
+        path = set_dir / f"metrics{suffix}.json"
+        shown = path.relative_to(ROOT).as_posix()
+        old = json.loads(path.read_text(encoding="utf-8"))
+        new = json.loads(json.dumps({"meta": meta, "splits": metrics}, ensure_ascii=False))
+        same_id = {k: old["meta"].get(k) for k in ("judge_model", "judge_prompt")} == \
+                  {k: new["meta"][k] for k in ("judge_model", "judge_prompt")}
+        diffs = _diff(old["splits"], new["splits"]) + ([] if same_id else ["meta：评审模型或评审提示词不同"])
+        if diffs:
+            print(f"\n复算与 {shown} 不一致（{len(diffs)} 处，列前 20 处）：\n" + "\n".join(diffs[:20]))
+            sys.exit(1)
+        print(f"\n复算一致：{shown} 的 {len(metrics)} 个划分逐项相同（未写任何文件）")
+        return
     report_path = set_dir / f"report{suffix}.md"
     report_path.write_text("\n".join(L), encoding="utf-8")
     write_json(set_dir / f"metrics{suffix}.json", {"meta": meta, "splits": metrics})

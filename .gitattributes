@@ -1,0 +1,2 @@
+# 容器里执行的 shell 脚本必须是 LF 行尾（Windows 上 core.autocrlf=true 检出会变成 CRLF，sh 跑不起来）
+*.sh text eol=lf

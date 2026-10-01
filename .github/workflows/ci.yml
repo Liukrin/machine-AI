@@ -1,0 +1,54 @@
+# CI：后端测试、前端类型检查与构建、两个 Docker 镜像能否构建。
+# CI 上没有知识库（data/、chroma_db/、models/ 不入库）也没有 API Key：
+# 带 kb 标记的测试自动跳过（本地有知识库时 pytest 会全部跑），不会调用大模型。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: 安装依赖（torch 用 CPU 版）
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu "$(grep -E '^torch==' requirements.txt)"
+          pip install -r requirements.txt -r requirements-dev.txt
+      - name: pytest
+        run: pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 构建镜像（只验证能构建，不推送）
+        run: docker compose build

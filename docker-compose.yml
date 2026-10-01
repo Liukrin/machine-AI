@@ -1,0 +1,54 @@
+# 一条命令起前后端：docker compose up -d --build，浏览器打开 http://localhost:8080
+#
+# 前提（都不入库，见 README「构建知识库」）：
+#   models/bge-small-zh-v1.5   本地 embedding 模型
+#   data/chunks/               chunks.jsonl 与 BM25 索引
+#   chroma_db/                 向量库
+#   .env                       DEEPSEEK_API_KEY（照 .env.example 填）
+# 这些都只读挂进容器，容器不会改宿主机上的任何文件；请求日志写在 request-logs 卷里：
+#   docker compose exec api python scripts/log_report.py
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+    image: machine-ai-api
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./models/bge-small-zh-v1.5:/app/models/bge-small-zh-v1.5:ro
+      - ./data/chunks:/app/data/chunks:ro
+      - ./chroma_db:/kb/chroma_db:ro
+      - request-logs:/app/logs
+    healthcheck:
+      # 启动时要预加载模型和索引，就绪后 /api/health 才返回
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      retries: 3
+      start_period: 120s
+      start_interval: 2s     # 启动阶段每 2 秒查一次，就绪了尽快放行前端
+    mem_limit: 2g
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+    image: machine-ai-web
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 128m
+    restart: unless-stopped
+
+volumes:
+  request-logs:

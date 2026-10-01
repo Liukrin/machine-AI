@@ -1,7 +1,7 @@
 import { memo, useMemo, useState, type ReactNode } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { ChunkRef } from '../api';
+import type { ChunkRef, Rating } from '../api';
 import { CITE_PREFIX, extractCitedIds, isModelRefusal, linkCitations } from '../lib/citations';
 import { fmtMs, pagesLabel, sectionTitle } from '../lib/format';
 import type { Turn } from '../types';
@@ -14,18 +14,24 @@ import {
   IconShieldAlert,
   IconShieldCheck,
   IconSparkle,
+  IconThumbDown,
+  IconThumbUp,
   LogoMark,
 } from './icons';
 import { SourceSkeleton, SourceStrip } from './Sources';
 import { StepTimeline } from './Steps';
 
+/** 写回 👍/👎（rating 为 null 表示撤销）；失败时抛错，由按钮提示 */
+type FeedbackFn = (turn: Turn, rating: Rating | null, comment?: string) => Promise<void>;
+
 type Props = {
   turn: Turn;
   onOpenSource: (chunk: ChunkRef, index: number) => void;
   onRetry: (question: string) => void;
+  onFeedback: FeedbackFn;
 };
 
-export const TurnView = memo(function TurnView({ turn, onOpenSource, onRetry }: Props) {
+export const TurnView = memo(function TurnView({ turn, onOpenSource, onRetry, onFeedback }: Props) {
   const [hoverId, setHoverId] = useState<string | null>(null);
   const citedIds = useMemo(() => extractCitedIds(turn.answer), [turn.answer]);
   const streaming = turn.status === 'generating';
@@ -48,7 +54,10 @@ export const TurnView = memo(function TurnView({ turn, onOpenSource, onRetry }: 
         </div>
         <div className="min-w-0 flex-1 space-y-4">
           {turn.status === 'rejected' && turn.rejected ? (
-            <RejectedNotice turn={turn} onOpenSource={onOpenSource} />
+            <>
+              <RejectedNotice turn={turn} onOpenSource={onOpenSource} />
+              {turn.requestId && <FeedbackRow turn={turn} onFeedback={onFeedback} />}
+            </>
           ) : (
             <>
               {isAgent && <StepTimeline turn={turn} />}
@@ -77,7 +86,9 @@ export const TurnView = memo(function TurnView({ turn, onOpenSource, onRetry }: 
                 )
               )}
               {turn.status === 'done' && turn.done?.finish_reason === 'length' && <TruncatedNotice />}
-              {turn.status === 'done' && !refused && <AnswerFooter turn={turn} />}
+              {turn.status === 'done' && !refused && <AnswerFooter turn={turn} onFeedback={onFeedback} />}
+              {/* 拒答也要能评：误拒（手册里其实有）是最想收集的反馈之一 */}
+              {turn.status === 'done' && refused && turn.requestId && <FeedbackRow turn={turn} onFeedback={onFeedback} />}
             </>
           )}
           {turn.status === 'stopped' && <p className="text-xs text-slate-400">已停止生成</p>}
@@ -165,7 +176,7 @@ function Answer({ text, streaming, chunks, onHover, onOpen }: AnswerProps) {
   );
 }
 
-function AnswerFooter({ turn }: { turn: Turn }) {
+function AnswerFooter({ turn, onFeedback }: { turn: Turn; onFeedback: FeedbackFn }) {
   const [copied, setCopied] = useState(false);
   const [showSuspicious, setShowSuspicious] = useState(false);
   const v = turn.verification;
@@ -246,6 +257,7 @@ function AnswerFooter({ turn }: { turn: Turn }) {
               {fmtMs(turn.done.elapsed_ms)}
             </span>
           )}
+          {turn.requestId && <FeedbackButtons turn={turn} onFeedback={onFeedback} />}
           <button
             type="button"
             onClick={copy}
@@ -265,6 +277,119 @@ function AnswerFooter({ turn }: { turn: Turn }) {
         </ul>
       )}
     </div>
+  );
+}
+
+/** 拒答（模型拒答、rag 模式的拒答闸）下方的一行评价 */
+function FeedbackRow({ turn, onFeedback }: { turn: Turn; onFeedback: FeedbackFn }) {
+  return (
+    <div className="flex items-center justify-end gap-2 text-xs text-slate-400">
+      这个结果有帮助吗？
+      <FeedbackButtons turn={turn} onFeedback={onFeedback} />
+    </div>
+  );
+}
+
+/** 👍/👎：再点一次撤销；点 👎 后弹出一个可选的说明框（「数值错了」「手册里其实有」），写进请求日志 */
+function FeedbackButtons({ turn, onFeedback }: { turn: Turn; onFeedback: FeedbackFn }) {
+  const [pending, setPending] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const [comment, setComment] = useState('');
+  const current = turn.feedback?.rating ?? null;
+
+  const send = async (rating: Rating | null, text?: string) => {
+    setPending(true);
+    setFailed(false);
+    try {
+      await onFeedback(turn, rating, text);
+    } catch {
+      setFailed(true);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const click = (rating: Rating) => {
+    if (pending) return;
+    if (current === rating) {
+      setAsking(false);
+      void send(null);
+      return;
+    }
+    setAsking(rating === -1);
+    void send(rating);
+  };
+
+  const submitComment = () => {
+    setAsking(false);
+    if (comment.trim()) void send(-1, comment.trim());
+  };
+
+  const btn = (active: boolean, activeClass: string) =>
+    `rounded-md p-1 transition disabled:opacity-50 ${active ? activeClass : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'}`;
+
+  return (
+    <span className="relative flex items-center gap-0.5">
+      {failed && <span className="mr-1 text-rose-600">没发出去，再点一次</span>}
+      <button
+        type="button"
+        onClick={() => click(1)}
+        disabled={pending}
+        title={current === 1 ? '已评价：有帮助（再点一次撤销）' : '有帮助'}
+        className={btn(current === 1, 'bg-teal-50 text-teal-700')}
+      >
+        <IconThumbUp className="h-3.5 w-3.5" fill={current === 1 ? 'currentColor' : 'none'} />
+      </button>
+      <button
+        type="button"
+        onClick={() => click(-1)}
+        disabled={pending}
+        title={current === -1 ? `已评价：没帮助${turn.feedback?.comment ? `（${turn.feedback.comment}）` : ''}，再点一次撤销` : '没帮助'}
+        className={btn(current === -1, 'bg-rose-50 text-rose-600')}
+      >
+        <IconThumbDown className="h-3.5 w-3.5" fill={current === -1 ? 'currentColor' : 'none'} />
+      </button>
+      {asking && (
+        // 向上弹出：按钮在回答底部，往下弹会被滚动区域的底边挡住
+        <div className="anim-fade-up absolute bottom-full right-0 z-20 mb-2 w-72 rounded-lg bg-white p-2.5 text-left shadow-lg ring-1 ring-slate-200">
+          <div className="mb-1.5 text-xs font-medium text-slate-600">哪里不对？（可选）</div>
+          <textarea
+            autoFocus
+            rows={2}
+            maxLength={500}
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                submitComment();
+              } else if (e.key === 'Escape') {
+                setAsking(false);
+              }
+            }}
+            placeholder="如：数值错了、漏了步骤、手册里其实有"
+            className="w-full resize-none rounded-md border border-slate-200 px-2 py-1.5 text-xs leading-5 text-slate-700 outline-none focus:border-teal-400"
+          />
+          <div className="mt-1.5 flex justify-end gap-1.5">
+            <button
+              type="button"
+              onClick={() => setAsking(false)}
+              className="rounded-md px-2 py-1 text-xs text-slate-500 transition hover:bg-slate-100"
+            >
+              跳过
+            </button>
+            <button
+              type="button"
+              onClick={submitComment}
+              className="rounded-md bg-teal-600 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-teal-700"
+            >
+              提交
+            </button>
+          </div>
+        </div>
+      )}
+    </span>
   );
 }
 

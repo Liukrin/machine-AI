@@ -1,0 +1,2 @@
+# 开发与 CI 用：pytest（测试说明见 tests/conftest.py）
+pytest==9.1.1

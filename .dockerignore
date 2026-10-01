@@ -1,0 +1,20 @@
+# 镜像里只放代码和配置：模型、知识库、索引运行时从宿主机只读挂载（见 docker-compose.yml），API Key 走 env_file
+.env
+.git
+.github
+.claude
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ipynb_checkpoints
+models
+data
+chroma_db
+logs
+eval
+docs
+tests
+frontend/node_modules
+frontend/dist
+requirements.lock.txt
