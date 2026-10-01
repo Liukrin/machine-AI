@@ -8,10 +8,14 @@ export type DocumentInfo = {
   chunk_count: number;
 };
 
+export type Mode = 'agent' | 'rag';
+
 export type Health = {
   status: string;
   chunk_count: number;
   model_name: string;
+  /** /api/ask 不指定 mode 时的默认模式（旧后端没有该字段） */
+  default_mode?: Mode;
   documents: DocumentInfo[];
 };
 
@@ -27,10 +31,10 @@ export type ChunkMeta = {
   pages: [number, number] | null;
 };
 
-/** retrieval 事件里的检索结果（不含全文，全文走 /api/chunks/{id} 按需拉取） */
+/** retrieval 事件里的来源片段（不含全文，全文走 /api/chunks/{id} 按需拉取） */
 export type ChunkRef = ChunkMeta & {
-  /** 向量 cosine distance，越小越相关，与拒答阈值同口径 */
-  distance: number;
+  /** 与检索问句的向量 cosine distance，越小越相关；Agent 查表、读相邻片段得到的片段没有，为 null */
+  distance: number | null;
   preview: string;
 };
 
@@ -44,6 +48,8 @@ export type Verification = {
   suspicious: string[];
   cited_ids: string[];
   fabricated_ids: string[];
+  /** 后端判定的拒答（含拒答话术且没有引用任何片段）；rag 模式与旧会话记录没有该字段 */
+  refused?: boolean;
 };
 
 export type Rejected = {
@@ -53,22 +59,58 @@ export type Rejected = {
 };
 
 export type Done = {
+  mode?: Mode;
   total_tokens: number | null;
   input_tokens?: number | null;
   output_tokens?: number | null;
+  /** 输入 token 中命中服务端缓存的部分（agent 模式） */
+  cache_read_tokens?: number | null;
   elapsed_ms: number;
   /** 模型结束原因："stop" 正常结束，"length" 被生成长度上限截断（旧会话记录里没有该字段） */
   finish_reason?: string | null;
+  /** agent 模式：模型调用次数、工具调用次数（含系统预检索）、是否因达到轮数上限被强制作答 */
+  llm_calls?: number;
+  tool_calls?: number;
+  forced_final?: boolean;
+  model_name?: string | null;
+  /** 按 config llm_pricing 估算的本次费用（元） */
+  cost_yuan?: number;
 };
 
-/** 事件顺序：retrieval → (rejected | token* + verification + done) / error */
+/** Agent 的步骤事件（step）：模型开始一次调用、工具开始/结束、中间轮次的说明文字、达到轮数上限 */
+export type StepEvent =
+  | { type: 'llm_start'; round: number; forced: boolean }
+  | { type: 'tool_start'; id: string; round: number; name: string; label: string; args: Record<string, unknown>; auto?: boolean }
+  | {
+      type: 'tool_end';
+      id: string;
+      round: number;
+      name: string;
+      label: string;
+      args: Record<string, unknown>;
+      ok: boolean;
+      summary: string;
+      elapsed_ms: number;
+      auto?: boolean;
+      output?: string | null;
+    }
+  | { type: 'thought'; round: number; text: string }
+  | { type: 'forced_final'; round: number };
+
+/**
+ * rag 模式：retrieval → (rejected | token* + verification + done) / error
+ * agent 模式：step / retrieval（累计的来源列表）穿插 → token*（带 round）→ verification → done / error
+ */
 export type StreamEvent =
   | { event: 'retrieval'; data: { chunks: ChunkRef[] } }
   | { event: 'rejected'; data: Rejected }
-  | { event: 'token'; data: { text: string } }
+  | { event: 'step'; data: StepEvent }
+  | { event: 'token'; data: { text: string; round?: number } }
   | { event: 'verification'; data: Verification }
   | { event: 'done'; data: Done }
   | { event: 'error'; data: { message: string } };
+
+export type HistoryMessage = { role: 'user' | 'assistant'; content: string };
 
 export async function fetchHealth(): Promise<Health> {
   const res = await fetch('/api/health');
@@ -120,14 +162,14 @@ function dispatchRawEvent(raw: string, onEvent: (e: StreamEvent) => void): void 
  * 按空行切分事件块。signal 中止时 fetch / read 会抛 AbortError。
  */
 export async function askStream(
-  question: string,
+  req: { question: string; history: HistoryMessage[]; mode: Mode },
   onEvent: (e: StreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const res = await fetch('/api/ask', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify(req),
     signal,
   });
   if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);

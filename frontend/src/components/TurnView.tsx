@@ -17,6 +17,7 @@ import {
   LogoMark,
 } from './icons';
 import { SourceSkeleton, SourceStrip } from './Sources';
+import { StepTimeline } from './Steps';
 
 type Props = {
   turn: Turn;
@@ -29,7 +30,9 @@ export const TurnView = memo(function TurnView({ turn, onOpenSource, onRetry }: 
   const citedIds = useMemo(() => extractCitedIds(turn.answer), [turn.answer]);
   const streaming = turn.status === 'generating';
   const waiting = (turn.status === 'retrieving' || turn.status === 'generating') && !turn.answer;
-  const refused = turn.status === 'done' && isModelRefusal(turn.answer);
+  // 后端给出的拒答判定优先（agent 模式）；旧会话记录按前端规则判断
+  const refused = turn.status === 'done' && (turn.verification?.refused ?? isModelRefusal(turn.answer));
+  const isAgent = turn.mode === 'agent';
 
   return (
     <div className="anim-fade-up space-y-5">
@@ -48,6 +51,7 @@ export const TurnView = memo(function TurnView({ turn, onOpenSource, onRetry }: 
             <RejectedNotice turn={turn} onOpenSource={onOpenSource} />
           ) : (
             <>
+              {isAgent && <StepTimeline turn={turn} />}
               {turn.status === 'retrieving' && <SourceSkeleton />}
               {turn.chunks.length > 0 && (
                 <SourceStrip
@@ -58,9 +62,9 @@ export const TurnView = memo(function TurnView({ turn, onOpenSource, onRetry }: 
                   onOpen={onOpenSource}
                 />
               )}
-              {waiting && <Progress turn={turn} />}
+              {waiting && !(isAgent && turn.steps?.length) && <Progress turn={turn} />}
               {refused ? (
-                <InsufficientNotice />
+                <InsufficientNotice detail={isAgent ? turn.answer : undefined} />
               ) : (
                 turn.answer && (
                   <Answer
@@ -216,7 +220,8 @@ function AnswerFooter({ turn }: { turn: Turn }) {
         )}
         <span className="ml-auto flex items-center gap-3 text-slate-400">
           {turn.done && (
-            <span>
+            <span title={turn.done.cost_yuan != null ? `按高峰时段单价估算约 ¥${turn.done.cost_yuan.toFixed(4)}` : undefined}>
+              {turn.done.llm_calls != null && `模型调用 ${turn.done.llm_calls} 次 · `}
               {turn.done.total_tokens != null && `${turn.done.total_tokens.toLocaleString()} tokens · `}
               {fmtMs(turn.done.elapsed_ms)}
             </span>
@@ -286,12 +291,15 @@ function TruncatedNotice() {
   );
 }
 
-function InsufficientNotice() {
+function InsufficientNotice({ detail }: { detail?: string }) {
+  // agent 模式的拒答带有「查过什么」的说明，原样展示；rag 模式只有一句拒答话术
+  const explain = detail?.replace(/^\s*知识库无相关内容[。.，,：:]?\s*/, '').trim();
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-      <div className="text-sm font-semibold text-slate-800">检索到的片段不足以回答这个问题</div>
+      <div className="text-sm font-semibold text-slate-800">手册里没有找到能回答这个问题的内容</div>
       <p className="mt-1 text-sm leading-6 text-slate-600">
-        模型判断上方片段中没有足够的依据，因此没有给出答案。可以补充设备型号或换个说法再试。
+        {explain || '模型判断上方片段中没有足够的依据，因此没有给出答案。'}
+        {' '}可以补充设备型号或换个说法再试。
       </p>
     </div>
   );

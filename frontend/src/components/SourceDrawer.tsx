@@ -32,7 +32,7 @@ export function SourceDrawer({ source, onClose }: { source: OpenSource | null; o
   if (!source) return null;
   const { chunk: c, index } = source;
   const isTable = c.chunk_type === 'table';
-  const similarity = Math.max(0, Math.min(1, 1 - c.distance));
+  const similarity = c.distance == null ? null : Math.max(0, Math.min(1, 1 - c.distance));
   const path = sectionPath(c);
 
   return (
@@ -70,13 +70,17 @@ export function SourceDrawer({ source, onClose }: { source: OpenSource | null; o
             {isTable ? '表格' : '正文'}
           </dd>
           <dt className="text-slate-400">相似度</dt>
-          <dd className="flex items-center gap-2 text-slate-700">
-            <span className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100">
-              <span className="block h-full rounded-full bg-teal-500" style={{ width: `${similarity * 100}%` }} />
-            </span>
-            {similarity.toFixed(3)}
-            <span className="text-slate-400">（向量距离 {c.distance.toFixed(4)}）</span>
-          </dd>
+          {similarity == null || c.distance == null ? (
+            <dd className="text-slate-500">（由查表或读取相邻片段得到，没有检索相似度）</dd>
+          ) : (
+            <dd className="flex items-center gap-2 text-slate-700">
+              <span className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100">
+                <span className="block h-full rounded-full bg-teal-500" style={{ width: `${similarity * 100}%` }} />
+              </span>
+              {similarity.toFixed(3)}
+              <span className="text-slate-400">（向量距离 {c.distance.toFixed(4)}）</span>
+            </dd>
+          )}
           {path.length > 1 && (
             <>
               <dt className="text-slate-400">章节</dt>

@@ -85,6 +85,27 @@ export const IconSparkle = (p: IconProps) => (
   </Icon>
 );
 
+export const IconSearch = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="11" cy="11" r="6.5" />
+    <path d="M20 20l-4.2-4.2" />
+  </Icon>
+);
+
+export const IconSwap = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 8h13l-3.5-3.5M20 16H7l3.5 3.5" />
+  </Icon>
+);
+
+export const IconGauge = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4.5 16.5a8 8 0 1 1 15 0" />
+    <path d="M12 12.5l3.5-3.5" />
+    <circle cx="12" cy="13" r="1.2" />
+  </Icon>
+);
+
 export const IconCheck = (p: IconProps) => (
   <Icon {...p} strokeWidth={2.2}>
     <path d="M5 12.5l4.5 4.5L19 7.5" />

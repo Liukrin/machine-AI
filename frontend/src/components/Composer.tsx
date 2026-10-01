@@ -1,17 +1,25 @@
 import { useLayoutEffect, useRef } from 'react';
+import type { Mode } from '../api';
 import { IconArrowUp, IconStop } from './icons';
 
 type Props = {
   value: string;
   busy: boolean;
+  mode: Mode;
+  onModeChange: (m: Mode) => void;
   onChange: (v: string) => void;
   onSubmit: () => void;
   onStop: () => void;
 };
 
+const MODES: { value: Mode; label: string; title: string }[] = [
+  { value: 'agent', label: 'Agent', title: '模型可多次检索、查表、换算单位、核对限值，并参考本会话最近几轮对话' },
+  { value: 'rag', label: '直接检索', title: '检索一次后直接生成（阶段 1 的基线流程），不看上文，相关度低时直接拒答' },
+];
+
 const MAX_HEIGHT = 180;
 
-export function Composer({ value, busy, onChange, onSubmit, onStop }: Props) {
+export function Composer({ value, busy, mode, onModeChange, onChange, onSubmit, onStop }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
   // 输入框随内容自动增高，超过上限后内部滚动
@@ -68,9 +76,31 @@ export function Composer({ value, busy, onChange, onSubmit, onStop }: Props) {
             </button>
           )}
         </div>
-        <p className="mt-2 text-center text-[11px] leading-4 text-slate-400">
-          回答由大模型依据手册片段生成，涉及安全操作请以原手册为准 · 每个问题独立检索，暂不关联上文
-        </p>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 px-1">
+          <div role="radiogroup" aria-label="问答模式" className="inline-flex rounded-lg bg-slate-100 p-0.5 text-[11px] font-medium">
+            {MODES.map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                role="radio"
+                aria-checked={mode === m.value}
+                aria-label={m.label}
+                disabled={busy}
+                title={m.title}
+                onClick={() => onModeChange(m.value)}
+                className={`rounded-md px-2.5 py-1 transition disabled:cursor-not-allowed ${
+                  mode === m.value ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] leading-4 text-slate-400">
+            回答依据手册片段生成，涉及安全操作请以原手册为准 ·{' '}
+            {mode === 'agent' ? '会参考本会话最近几轮对话' : '每个问题独立检索，不关联上文'}
+          </p>
+        </div>
       </form>
     </div>
   );

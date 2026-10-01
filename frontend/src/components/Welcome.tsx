@@ -1,12 +1,16 @@
 import type { ReactNode } from 'react';
 import type { DocumentInfo } from '../api';
-import { IconArrowRight, IconFileText, IconShieldCheck, IconSparkle, IconTable, LogoMark } from './icons';
+import { IconArrowRight, IconFileText, IconGauge, IconSparkle, IconTable, LogoMark } from './icons';
 
-// 示例问题均取自评测集或已验证可答的问题，覆盖正文 / 表格 / 多来源三种形态
+// 示例问题均取自评测集或已验证可答的问题，覆盖正文 / 表格 / 限值核对（换算 + 代码比较）/ 多来源
 const EXAMPLES: { tag: string; icon: ReactNode; question: string }[] = [
   { tag: '安装对中', icon: <IconFileText className="h-3.5 w-3.5" />, question: '水泵与电动机同心度允差是多少？' },
   { tag: '表格查询', icon: <IconTable className="h-3.5 w-3.5" />, question: '出水管径125时轴封水量是多少？' },
-  { tag: '安全事项', icon: <IconShieldCheck className="h-3.5 w-3.5" />, question: '更换耐磨环前需注意什么安全事项？' },
+  {
+    tag: '限值核对',
+    icon: <IconGauge className="h-3.5 w-3.5" />,
+    question: 'Model 3700 轴承温度实测 185°F，在手册要求的范围内吗？',
+  },
   { tag: '多手册综合', icon: <IconSparkle className="h-3.5 w-3.5" />, question: '泵启动前要做哪些检查？' },
 ];
 
