@@ -1,7 +1,7 @@
 {
  "meta": {
   "run": "baseline",
-  "generated_at": "2026-09-30 00:58",
+  "generated_at": "2026-09-30 22:15",
   "system": {
    "model": "deepseek-chat",
    "temperature": 0.0,
@@ -15,9 +15,12 @@
    "system_id": "75198a4ed85b"
   },
   "items_path": "eval/answer_set.yaml",
+  "set": "main",
+  "set_title": "答案级评测集",
   "n_items": 150,
   "judge_model": "deepseek-chat",
-  "judge_prompt": "17425fb4a83f"
+  "judge_prompt": "17425fb4a83f",
+  "pricing_note": "输入未命中 2.0、命中 0.04、输出 8.0 元/百万 tokens"
  },
  "splits": {
   "dev": {
@@ -163,6 +166,50 @@
     "output_mean": 61.11538461538461,
     "input_sum": 53179,
     "output_sum": 3178
+   },
+   "cost": {
+    "upper_mean": 0.0018750909090909092,
+    "n_upper": 77,
+    "actual_mean": null,
+    "n_actual": 0
+   },
+   "by_type": {
+    "fact": {
+     "n": 26,
+     "strict_correct": 25,
+     "false_refusal": 1,
+     "evidence_all": 26
+    },
+    "procedure": {
+     "n": 6,
+     "strict_correct": 5,
+     "false_refusal": 0,
+     "evidence_all": 5
+    },
+    "table": {
+     "n": 15,
+     "strict_correct": 14,
+     "false_refusal": 1,
+     "evidence_all": 14
+    },
+    "cross_chunk": {
+     "n": 5,
+     "strict_correct": 4,
+     "false_refusal": 0,
+     "evidence_all": 4
+    },
+    "colloquial": {
+     "n": 5,
+     "strict_correct": 1,
+     "false_refusal": 3,
+     "evidence_all": 3
+    },
+    "multi_turn": {
+     "n": 5,
+     "strict_correct": 0,
+     "false_refusal": 5,
+     "evidence_all": 3
+    }
    }
   },
   "test": {
@@ -308,6 +355,50 @@
     "output_mean": 57.108695652173914,
     "input_sum": 44597,
     "output_sum": 2627
+   },
+   "cost": {
+    "upper_mean": 0.001703890410958904,
+    "n_upper": 73,
+    "actual_mean": null,
+    "n_actual": 0
+   },
+   "by_type": {
+    "fact": {
+     "n": 26,
+     "strict_correct": 25,
+     "false_refusal": 1,
+     "evidence_all": 25
+    },
+    "procedure": {
+     "n": 5,
+     "strict_correct": 3,
+     "false_refusal": 2,
+     "evidence_all": 4
+    },
+    "table": {
+     "n": 14,
+     "strict_correct": 9,
+     "false_refusal": 4,
+     "evidence_all": 12
+    },
+    "cross_chunk": {
+     "n": 4,
+     "strict_correct": 3,
+     "false_refusal": 0,
+     "evidence_all": 3
+    },
+    "colloquial": {
+     "n": 5,
+     "strict_correct": 3,
+     "false_refusal": 2,
+     "evidence_all": 4
+    },
+    "multi_turn": {
+     "n": 5,
+     "strict_correct": 0,
+     "false_refusal": 5,
+     "evidence_all": 5
+    }
    }
   }
  }

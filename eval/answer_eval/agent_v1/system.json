@@ -1,0 +1,19 @@
+{
+ "mode": "agent",
+ "model": "deepseek-chat",
+ "temperature": 0.0,
+ "prompt_version": "agent",
+ "prompt_sha1": "dce3bbc9e32f",
+ "top_k": 5,
+ "max_tokens": 1024,
+ "tau_distance": 0.3567,
+ "max_tool_rounds": 3,
+ "max_calls_per_round": 4,
+ "tool_timeout_s": 10.0,
+ "lookup_max_rows": 12,
+ "history_turns": 3,
+ "history_answer_chars": 600,
+ "corpus": "0d8fe1ee02aeecde",
+ "code_sha1": "fb19760b90fe",
+ "system_id": "a62c1e9b641a"
+}

@@ -1,8 +1,11 @@
 """调用被测系统并缓存它的输出。
 
 被测系统就是线上问答流水线：这里直接驱动 src/s5_app/api.py 的 _sse_events（FastAPI 接口
-背后的事件生成器），不经 HTTP。评测拿到的检索结果、拒答、答案、token 与线上同源，
-线上流程以后怎么改（比如换成工具调用），评测都跟着走，不需要另写一套。
+背后的事件生成器），不经 HTTP。评测拿到的检索结果、工具调用、拒答、答案、token 与线上同源。
+
+两种模式（system.json 的 mode）：
+  rag    阶段 1 的固定流水线（检索 → 拒答闸 → 生成），不看对话历史；
+  agent  工具调用 Agent（src/s4_agent/agent.py），多轮题把前文历史一起发过去，每一步工具调用都记下来。
 """
 from __future__ import annotations
 
@@ -20,37 +23,43 @@ for _p in ("src", "src/s3_eval", "src/s4_agent", "src/s5_app"):
 _PIPELINE_FILES = [
     "src/s5_app/api.py", "src/s4_agent/graph.py", "src/s4_agent/verify.py",
     "src/s3_eval/hybrid_retrieval.py", "src/llm_config.py",
+    "src/s4_agent/agent.py", "src/s4_agent/tools.py", "src/s4_agent/units.py", "src/s4_agent/tables.py",
 ]
+MODES = ("agent", "rag")
 
 
 def _sha1(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()
 
 
-def system_info(corpus_fingerprint: str) -> dict:
-    """被测系统的指纹：模型、提示词、检索与生成参数、语料、流水线源码。"""
-    import graph
+def system_info(corpus_fingerprint: str, mode: str) -> dict:
+    """被测系统的指纹：模式、模型、提示词、检索与生成参数、Agent 的约束参数、语料、流水线源码。"""
     from llm_config import LLM_CONFIG
 
     code = hashlib.sha1()
     for rel in _PIPELINE_FILES:
         code.update((ROOT / rel).read_bytes().replace(b"\r\n", b"\n"))
-    info = {
-        "model": LLM_CONFIG["model"],
-        "temperature": LLM_CONFIG["temperature"],
-        "prompt_version": graph.PROMPT_VERSION,
-        "prompt_sha1": _sha1(graph.SYSTEM_PROMPT)[:12],
-        "top_k": graph.TOP_K,
-        "max_tokens": graph.MAX_TOKENS,
-        "tau_distance": graph.TAU_DISTANCE,
-        "corpus": corpus_fingerprint,
-        "code_sha1": code.hexdigest()[:12],
-    }
+    base = {"mode": mode, "model": LLM_CONFIG["model"], "temperature": LLM_CONFIG["temperature"]}
+    if mode == "rag":
+        import graph
+        info = {**base, "prompt_version": graph.PROMPT_VERSION, "prompt_sha1": _sha1(graph.SYSTEM_PROMPT)[:12],
+                "top_k": graph.TOP_K, "max_tokens": graph.MAX_TOKENS, "tau_distance": graph.TAU_DISTANCE}
+    elif mode == "agent":
+        import agent
+        c = agent.CFG
+        info = {**base, "prompt_version": agent.PROMPT_VERSION, "prompt_sha1": _sha1(agent.SYSTEM_PROMPT)[:12],
+                "top_k": int(c["search_top_k"]), "max_tokens": int(c["max_tokens"]), "tau_distance": agent.TAU_DISTANCE,
+                "max_tool_rounds": int(c["max_tool_rounds"]), "max_calls_per_round": int(c["max_calls_per_round"]),
+                "tool_timeout_s": float(c["tool_timeout_s"]), "lookup_max_rows": int(c["lookup_max_rows"]),
+                "history_turns": int(c["history_turns"]), "history_answer_chars": int(c["history_answer_chars"])}
+    else:
+        raise ValueError(f"未知模式：{mode}（可选 {MODES}）")
+    info.update({"corpus": corpus_fingerprint, "code_sha1": code.hexdigest()[:12]})
     info["system_id"] = _sha1(json.dumps(info, sort_keys=True, ensure_ascii=False))[:12]
     return info
 
 
-def ask(question: str) -> dict:
+def ask(question: str, history: list[dict] | None = None, mode: str = "agent") -> dict:
     """问一次，收集事件流里的全部信息。耗时在调用方一侧计时。"""
     from api import _sse_events
 
@@ -59,29 +68,47 @@ def ask(question: str) -> dict:
         "verification": None, "finish_reason": None,
         "input_tokens": None, "output_tokens": None, "total_tokens": None,
         "t_first_token_ms": None, "t_total_ms": None, "error": None,
+        "mode": mode, "steps": [], "llm_calls": None, "tool_calls": None, "cache_read_tokens": None,
+        "forced_final": None, "model_name": None, "cost_yuan": None,
     }
-    parts: list[str] = []
+    parts: dict[int, list[str]] = {}
+    first_token: dict[int, float] = {}
+    thought_rounds: set[int] = set()
+    final_answer = None
     t0 = time.perf_counter()
-    for ev in _sse_events(question):
+    for ev in _sse_events(question, history or [], mode):
         name, data = ev["event"], json.loads(ev["data"])
-        if name == "retrieval":
+        if name == "retrieval":       # agent 模式下是累计的来源列表，取最后一次
             rec["retrieved"] = [{"chunk_id": c["chunk_id"], "distance": c["distance"]} for c in data["chunks"]]
         elif name == "rejected":
             rec["status"] = "rejected_gate"
             rec["top1_distance"], rec["tau"] = data["top1_distance"], data["tau"]
         elif name == "token":
-            if rec["t_first_token_ms"] is None:
-                rec["t_first_token_ms"] = round((time.perf_counter() - t0) * 1000, 1)
-            parts.append(data["text"])
+            rnd = data.get("round", 0)
+            first_token.setdefault(rnd, round((time.perf_counter() - t0) * 1000, 1))
+            parts.setdefault(rnd, []).append(data["text"])
+        elif name == "step":
+            if data["type"] == "tool_end":
+                rec["steps"].append({k: data.get(k) for k in
+                                     ("round", "name", "args", "ok", "summary", "elapsed_ms", "auto", "data", "output")})
+            elif data["type"] == "thought":
+                thought_rounds.add(data["round"])
         elif name == "verification":
             rec["verification"] = data
         elif name == "done":
-            for k in ("finish_reason", "input_tokens", "output_tokens", "total_tokens"):
+            for k in ("finish_reason", "input_tokens", "output_tokens", "total_tokens", "llm_calls", "tool_calls",
+                      "cache_read_tokens", "forced_final", "model_name", "cost_yuan"):
                 rec[k] = data.get(k)
+            final_answer = data.get("answer")
         elif name == "error":
             rec["status"], rec["error"] = "error", data.get("message")
     rec["t_total_ms"] = round((time.perf_counter() - t0) * 1000, 1)
-    rec["answer"] = "".join(parts).strip()
+    answer_rounds = [r for r in parts if r not in thought_rounds]
+    last = max(answer_rounds) if answer_rounds else None
+    # 首 token：最终回答那一轮的第一个 token（中间轮次决定调工具时流出的文字不算回答）
+    rec["t_first_token_ms"] = first_token.get(last) if last is not None else None
+    rec["answer"] = (final_answer if final_answer is not None
+                     else "".join(parts.get(last, [])) if last is not None else "").strip()
     # 拒答闸用的向量 top-1 距离：作答的题事件流里不带，这里补算一次（不计入耗时），用于分析闸的区分度
     from hybrid_retrieval import vector_top1_distance
     rec["gate_distance"] = round(vector_top1_distance(question), 6)
@@ -107,35 +134,42 @@ def save_answers(path: Path, answers: dict[str, dict]) -> None:
 
 def run_system(items: list[dict], answers_path: Path, system: dict, *,
                reuse_only: bool = False, force: bool = False) -> dict[str, dict]:
-    """逐题取系统输出。已缓存且系统指纹、问句都没变的直接复用；其余重新调用。
+    """逐题取系统输出。已缓存且系统指纹、问句、对话历史都没变的直接复用；其余重新调用。
 
-    多轮题（multi_turn）按线上现状只发最后一句；另外用 standalone 改写再问一次
-    （variant=standalone），用来估计「如果系统会把追问改写成独立问题」能到什么水平。
+    多轮题（multi_turn）：agent 模式把前文历史一起发（main）；rag 模式不支持历史，只发最后一句。
+    另外两种模式都用 standalone 改写再问一次（variant=standalone），作为「追问被完美改写」时的参考上限。
     """
+    mode = system.get("mode", "rag")
     answers = load_answers(answers_path)
-    todo: list[tuple[dict, str, str]] = []
+    todo: list[tuple[dict, str, str, list[dict]]] = []
     for it in items:
-        todo.append((it, "main", it["question"]))
+        history = it.get("history") or [] if mode == "agent" else []
+        todo.append((it, "main", it["question"], history))
         if it["type"] == "multi_turn" and it.get("standalone"):
-            todo.append((it, "standalone", it["standalone"]))
+            todo.append((it, "standalone", it["standalone"], []))
 
     n_new = 0
-    for i, (it, variant, question) in enumerate(todo, 1):
+    for i, (it, variant, question, history) in enumerate(todo, 1):
         key = _key(it["id"], variant)
+        hist_sha = _sha1(json.dumps(history, ensure_ascii=False, sort_keys=True))[:12] if history else None
         old = answers.get(key)
         fresh = (old is not None and not force and old.get("system_id") == system["system_id"]
-                 and old.get("question") == question and old.get("status") != "error")
+                 and old.get("question") == question and old.get("history_sha1") == hist_sha
+                 and old.get("status") != "error")
         if fresh:
             continue
         if reuse_only:
             raise RuntimeError(f"--reuse 要求全部答案已缓存，但 {key} 没有可用的缓存"
-                               "（系统指纹或问句变了，或上次出错）。去掉 --reuse 重新生成。")
-        rec = ask(question)
-        rec.update({"id": it["id"], "variant": variant, "question": question,
+                               "（系统指纹、问句或对话历史变了，或上次出错）。去掉 --reuse 重新生成。")
+        rec = ask(question, history, mode)
+        rec.update({"id": it["id"], "variant": variant, "question": question, "history_sha1": hist_sha,
                     "system_id": system["system_id"], "ran_at": time.strftime("%Y-%m-%d %H:%M:%S")})
         answers[key] = rec
         n_new += 1
         brief = rec["status"] if rec["status"] != "answered" else f"{len(rec['answer'])} 字"
+        if mode == "agent" and rec["status"] == "answered":
+            tools = [s["name"] for s in rec["steps"] if not s.get("auto")]
+            brief += f"，模型调用 {rec['llm_calls']} 次" + (f"，工具 {'、'.join(tools)}" if tools else "")
         print(f"[{i}/{len(todo)}] {key:<24} {rec['t_total_ms']:>7.0f} ms  {brief}", flush=True)
         if n_new % 10 == 0:
             save_answers(answers_path, answers)      # 中途落盘，失败重跑时不必从头来

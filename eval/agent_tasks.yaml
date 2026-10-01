@@ -1,0 +1,578 @@
+# Agent 多步任务集：考查「查到 → 再加工」的能力，而不只是把原文找出来。
+#
+# 与主评测集（eval/answer_set.yaml）字段相同，另有两处扩展：
+#   tools     期望用到的工具（只作统计，不计入对错）：search_manuals / lookup_table / read_section /
+#             convert_unit / check_value，见 src/s4_agent/tools.py
+#   calc      推算数值事实（换算结果、差值）的算式。这类数字不在手册原文里，validate.py 改为核对
+#             模式里每个 {n:…} 都是 calc 算式结果的正确舍入；算式里的换算系数在这里独立写出，
+#             不依赖 Agent 的换算工具，工具算错了评测能发现。
+#
+# 题型：convert 单位换算 | check 限值核对（实测值是否在手册规定范围内）| table_lookup 表格精确查询
+#      | multi_step 多步/跨手册 | oos_in_domain 手册没写的参数（应说明查不到，不得编造限值）
+#
+# 结论用语的正则（「超出」「合格」）在第一次出现时用 YAML 锚点定义（&exceed / &within），后面的题复用。
+# 作用在归一化后的答案上（全角转半角、去空白、小写、℃→°c，见 textnorm.norm）。
+#   exceed：超过了规定、不合格、不在范围内……；带否定前缀的「未超过」「不应超过」不算
+#   within：合格、符合、满足、在范围内、未超过……；「不合格」「是否合格」不算
+#
+# 换算系数（calc 用）：1 m³/h = 1000/60 L/min；1 bar = 14.5037738 psi；1 kgf/cm² = 0.0980665 MPa；
+#   1 psi = 0.00689476 MPa；1 ft = 0.3048 m；1 kgf·m = 9.80665 N·m；1 lbf·ft = 0.138255 kgf·m；°F = °C×9/5+32
+
+# ============================================================================ 单位换算
+
+- id: cv_01
+  type: convert
+  doc: '2'
+  expect: answer
+  tools: [convert_unit]
+  question: 'Wilo-WR 泵出水管路名义直径为 150 时，轴封水量是多少？折合每分钟多少升？'
+  reference: '按 Wilo-WR 泵的监控表，出水管路名义直径 125~200 对应的轴封水量为 0.20 m³/h（高于出口压力 0.5bar），折合约 3.33 L/min。'
+  facts:
+    - say: 轴封水量 0.20 m³/h
+      any: ['{n:0.2}m3/h', '{n:0.2}立方米']
+      numeric: true
+    - say: 折合约 3.33 L/min
+      any: ['{n:3.3}(l/min|lpm|升)', '{n:3.33}(l/min|lpm|升)', '{n:3.333}(l/min|lpm|升)']
+      numeric: true
+      calc: '0.2*1000/60'
+  evidence:
+    - quote: '125~200 0.20'
+
+- id: cv_02
+  type: convert
+  doc: '2'
+  expect: answer
+  tools: [convert_unit]
+  question: 'Wilo-WR 泵 GGG 壳体的最大承压是多少？换算成 MPa 和 psi 分别是多少？'
+  reference: 'GGG 壳体的水泵最大承压为 40 bar（介质温度 0℃～+100℃），即 4 MPa，约 580 psi。'
+  facts:
+    - say: 最大承压 40 bar
+      any: ['{n:40}bar']
+      numeric: true
+    - say: 4 MPa
+      any: ['{n:4}mpa']
+      numeric: true
+      calc: '40*0.1'
+    - say: 约 580 psi
+      any: ['{n:580}psi', '{n:580.2}psi', '{n:580.15}psi']
+      numeric: true
+      calc: '40*14.5037738'
+  evidence:
+    - quote: 'GG GGG 25 40'
+
+- id: cv_03
+  type: convert
+  doc: '1'
+  expect: answer
+  tools: [convert_unit]
+  question: 'D 型泵运转时，水泵轴承最高温度不应超过多少？用华氏度表示是多少？'
+  reference: 'D 型泵运转时水泵轴承最高温度不应超过 75℃，即 167°F。'
+  facts:
+    - say: 不超过 75℃
+      any: ['{n:75}{C}']
+      numeric: true
+    - say: 167°F
+      any: ['{n:167}{F}', '华氏{n:167}度']
+      numeric: true
+      calc: '75*9/5+32'
+  evidence:
+    - quote: '水泵轴承最高温度不应超过75℃'
+
+- id: cv_04
+  type: convert
+  doc: '4'
+  expect: answer
+  tools: [convert_unit]
+  question: 'Model 3700 的冷却水压力最高不能超过多少？换算成 MPa 大约是多少？'
+  reference: '冷却水压力不要超过 7.0 kg/cm²（100 psig），约 0.69 MPa。'
+  facts:
+    - say: 不超过 7.0 kg/cm²（100 psig）
+      any: ['{n:7}kgf?/cm2', '{n:100}psi']
+      numeric: true
+    - say: 约 0.69 MPa
+      any: ['{n:0.7}mpa', '{n:0.69}mpa', '{n:0.686}mpa', '{n:0.689}mpa', '{n:0.6865}mpa', '{n:0.6895}mpa']
+      numeric: true
+      calc: ['7*0.0980665', '100*0.00689476']
+  evidence:
+    - quote: '冷却水压力不要超过 7.0 kg'
+
+- id: cv_05
+  type: convert
+  doc: '4'
+  expect: answer
+  tools: [convert_unit]
+  question: 'Model 3700 采用外部冲洗时，冲洗液的注入速率要求是多少？换算成 m³/h 是多少？'
+  reference: '注入速率必须介于 2 到 8 lpm（0.5 到 2 gpm）之间，即 0.12 到 0.48 m³/h。'
+  facts:
+    - say: 2 到 8 lpm（0.5 到 2 gpm）
+      any: ['{n:2}(l/min|lpm|升/分)?{to}{n:8}(l/min|lpm|升/分)', '{n:2}{to}8 1pm', '{n:0.5}{to}{n:2}gpm']
+      numeric: true
+      src: '2 到 8 1pm'
+    - say: 0.12 到 0.48 m³/h
+      any: ['{n:0.12}(m3/h|立方米)?{to}{n:0.48}(m3/h|立方米)', '{n:0.11}(m3/h|立方米)?{to}{n:0.45}(m3/h|立方米)',
+            '{n:0.114}(m3/h|立方米)?{to}{n:0.454}(m3/h|立方米)']
+      numeric: true
+      calc: ['2*60/1000', '8*60/1000', '0.5*0.227125', '2*0.227125']
+  evidence:
+    - quote: '注入速率必须介于 2 到 8'
+
+- id: cv_06
+  type: convert
+  doc: '1'
+  expect: answer
+  tools: [convert_unit]
+  question: 'D 型泵改为外冲洗结构时，冲洗水压力至少要比泵进口压力高多少？折合多少 kgf/cm²？'
+  reference: '冲洗水压力应 ≥ 泵进口压力 + 0.2 MPa（首级双吸结构时 ≥ 泵单级扬程 + 进口压力 + 0.2 MPa）；0.2 MPa 约合 2.04 kgf/cm²。'
+  facts:
+    - say: 至少高 0.2 MPa
+      any: ['{n:0.2}mpa']
+      numeric: true
+    - say: 约 2.04 kgf/cm²
+      any: ['{n:2}(kgf|kg)/cm2', '{n:2.04}(kgf|kg)/cm2', '{n:2.039}(kgf|kg)/cm2', '{n:2.04}公斤', '{n:2.039}公斤']
+      numeric: true
+      calc: '0.2/0.0980665'
+  evidence:
+    - quote: '压力：≥泵进口压力+0.2MPa'
+
+- id: cv_07
+  type: convert
+  doc: '2'
+  expect: answer
+  tools: [convert_unit]
+  question: 'Wilo-WR 出水管路的最大流速是多少？换算成英尺每秒是多少？'
+  reference: '出水管路最大流速为 2.5 m/s（注意压差），约 8.2 ft/s。'
+  facts:
+    - say: 最大流速 2.5 m/s
+      any: ['{n:2.5}m/s', '2\. 5m/s']
+      numeric: true
+      src: '2. 5m/s'
+    - say: 约 8.2 ft/s
+      any: ['{n:8.2}(ft/s|英尺)', '{n:8.20}(ft/s|英尺)', '{n:8.202}(ft/s|英尺)']
+      numeric: true
+      calc: '2.5/0.3048'
+  evidence:
+    - quote: '最大流速 2. 5m/s'
+
+- id: cv_08
+  type: convert
+  doc: '4'
+  expect: answer
+  tools: [lookup_table, convert_unit]
+  question: 'Model 3700 泵壳螺栓（项目 356A）规格为 5/8 英寸 UNC 时，拧紧扭矩是多少？折合多少 kgf·m？'
+  reference: '泵壳螺栓 356A、5/8 英寸 UNC 的扭矩为 176 N·m（130 英尺-磅），约 17.9 kgf·m。'
+  facts:
+    - say: 176 N·m（130 英尺-磅）
+      any: ['{n:176}(nm|n·m|n\.m|n-m|牛)', '{n:130}(英尺|ft|lb)']
+      numeric: true
+    - say: 约 17.9 kgf·m
+      any: ['{n:18}kg', '{n:17.9}kg', '{n:17.95}kg', '{n:17.947}kg', '{n:18.0}kg', '{n:17.97}kg']
+      numeric: true
+      calc: ['176/9.80665', '130*0.138255']
+  evidence:
+    - quote: '176 Nm130英尺-磅'
+
+# ============================================================================ 限值核对
+
+- id: ck_01
+  type: check
+  doc: '1'
+  expect: answer
+  tools: [check_value]
+  question: 'D 型泵运行中测得轴承温度 78℃，是否超过手册规定？'
+  reference: '超过了手册规定。D 型泵运转时水泵轴承最高温度不应超过 75℃，78℃ 高出 3℃。'
+  facts:
+    - say: 限值 75℃
+      any: ['{n:75}{C}']
+      numeric: true
+    - say: 结论：超过
+      any: &exceed
+        - '(?<![未没不])超(过|出)了?(手册|规定|允许|上限|最高|限值|要求|范围|标准|最大|额定)'
+        - '(已|已经|确实|明显|也)超(过|出)'
+        - '超(标|限)'
+        - '(高|大)(出|于)了?(上限|限值|规定|允许|最大|手册|最高|正常|要求)'
+        - '不(合格|符合|满足)'
+        - '不在.{0,8}范围'
+        - '不可以|不能(用|使用)|不宜(使用|用)|不允许(使用|用)'
+  evidence:
+    - quote: '水泵轴承最高温度不应超过75℃'
+
+- id: ck_02
+  type: check
+  doc: '1'
+  expect: answer
+  tools: [check_value]
+  question: 'MD 型泵用来输送固体颗粒体积浓度为 2% 的矿井水，符合手册要求吗？'
+  reference: '不符合。MD 型煤矿用耐磨多级离心泵用于输送固体颗粒含量（体积浓度）不大于 1.5% 的中性矿井水，2% 超出了上限。'
+  facts:
+    - say: 限值不大于 1.5%
+      any: ['{n:1.5}%']
+      numeric: true
+    - say: 结论：不符合
+      any: *exceed
+  evidence:
+    - quote: '固体颗粒含量(体积浓度)不大于1.5%'
+
+- id: ck_03
+  type: check
+  doc: '2'
+  expect: answer
+  tools: [check_value]
+  question: 'Wilo-WR 泵用百分表对中，测得径向跳动 0.08mm，合格吗？'
+  reference: '合格。手册规定径向最大跳动 0.10mm（最佳值 0.05mm），0.08mm 在允许范围内，但没有达到最佳值。'
+  facts:
+    - say: 径向最大跳动 0.10mm
+      any: ['{n:0.1}{mm}']
+      numeric: true
+    - say: 结论：合格
+      any: &within
+        - '(?<![不否])(合格|符合|满足)'
+        - '(?<!不)在.{0,10}(范围|允许值|要求|规定)(之)?内'
+        - '(未|没有|没)超(过|出)'
+        - '低于(上限|限值|最大|允许|规定)'
+  evidence:
+    - quote: '径向最大跳动 0.10mm'
+
+- id: ck_04
+  type: check
+  doc: '2'
+  expect: answer
+  tools: [check_value]
+  question: 'GG 壳体的 Wilo-WR 泵，用在工作压力 2.8 MPa 的系统里可以吗？'
+  reference: '不可以。GG 壳体的水泵最大承压为 25 bar（即 2.5 MPa，介质温度 0℃～+100℃），2.8 MPa（28 bar）超出了最大承压。'
+  facts:
+    - say: GG 壳体最大承压 25 bar（2.5 MPa）
+      any: ['{n:25}bar', '{n:2.5}mpa']
+      numeric: true
+    - say: 结论：不可以
+      any: *exceed
+  evidence:
+    - quote: 'GG GGG 25 40'
+
+- id: ck_05
+  type: check
+  doc: '4'
+  expect: answer
+  tools: [check_value]
+  question: 'Model 3700 运行中测得轴承温度 190°F，在手册给出的正常范围内吗？'
+  reference: '不在。手册规定绝大多数工作条件下轴承温度应介于 49°C（120°F）和 82°C（180°F）之间，190°F 高于上限 180°F；轴承温度超过 82°C（180°F）时应使用 ISO 粘度级别 100 的润滑油。'
+  facts:
+    - say: 正常范围上限 82°C（180°F）
+      any: ['{n:180}{F}', '{n:82}{C}']
+      numeric: true
+    - say: 结论：超出范围
+      any: *exceed
+  evidence:
+    - quote: '轴承温度应该介于 49°C | 120°F 和 82°C | 180°F'
+
+- id: ck_06
+  type: check
+  doc: '4'
+  expect: answer
+  tools: [check_value, convert_unit]
+  question: 'Model 3700 采用外部冲洗时，冲洗液压力比密封腔压力高 0.5 bar，满足手册要求吗？'
+  reference: '满足。手册要求冲洗液压力比密封腔压力高出 0.35 到 1.01 kg/cm²（5 到 15 psi）；0.5 bar 约合 0.51 kg/cm²（7.25 psi），在要求范围内。'
+  facts:
+    - say: 要求高出 0.35 到 1.01 kg/cm²（5 到 15 psi）
+      any: ['{n:0.35}(kgf?/cm2)?{to}{n:1.01}', '{n:5}(psi)?{to}{n:15}psi']
+      numeric: true
+    - say: 0.5 bar 约合 0.51 kg/cm²（7.25 psi）
+      any: ['{n:0.51}(kgf|kg)/cm2', '{n:0.5099}(kgf|kg)/cm2', '{n:0.51}公斤', '{n:7.25}psi', '{n:7.3}psi', '{n:7.252}psi']
+      numeric: true
+      calc: ['0.5/0.980665', '0.5*14.5037738']
+    - say: 结论：满足
+      any: *within
+  evidence:
+    - quote: '高出 0.35 到 1.01 kg'
+
+- id: ck_07
+  type: check
+  doc: '4'
+  expect: answer
+  tools: [check_value]
+  question: 'Model 3700 最终校准时，工作温度下千分表的总读数（T.I.R.）测得 0.003 英寸，校准合格吗？'
+  reference: '不合格。手册要求工作温度下千分表总读数（T.I.R.）为 0.05 毫米（0.002 英寸）或更低，0.003 英寸超出了要求。'
+  facts:
+    - say: 要求 0.002 英寸（0.05 毫米）或更低
+      any: ['{n:0.002}{in}', '{n:0.05}{mm}']
+      numeric: true
+    - say: 结论：不合格
+      any: *exceed
+  evidence:
+    - quote: '为 0.05 毫米 | 0.002 英寸或更低'
+
+- id: ck_08
+  type: check
+  doc: '2'
+  expect: answer
+  tools: [lookup_table, check_value]
+  question: 'Wilo-WR 爪型联轴器外径 200mm，测得两个半联轴节端面间距为 7mm，符合要求吗？'
+  reference: '不符合。外径 160～225mm 的爪型联轴器，两半联轴节端面间距 c 应为 2～6mm，7mm 超出了上限。'
+  facts:
+    - say: 间距 c 应为 2～6mm
+      any: ['{n:2}({mm})?{to}{n:6}{mm}']
+      numeric: true
+    - say: 结论：不符合
+      any: *exceed
+  evidence:
+    - quote: '160~225mm 2~6mm'
+
+# ============================================================================ 表格精确查询
+
+- id: tb_01
+  type: table_lookup
+  doc: '4'
+  expect: answer
+  tools: [lookup_table]
+  question: 'Model 3700 的零件编号 184 是什么零件？'
+  reference: '零件编号 184 是密封腔盖。'
+  facts:
+    - say: 184 是密封腔盖
+      any: ['{n:184}.{0,8}密封腔盖', '密封腔盖.{0,8}{n:184}']
+      numeric: true
+  evidence:
+    - quote: '184 密封腔盖'
+
+- id: tb_02
+  type: table_lookup
+  doc: '4'
+  expect: answer
+  tools: [lookup_table]
+  question: 'Model 3700 的泵轴对应的零件编号是多少？'
+  reference: '泵轴的零件编号是 122。'
+  facts:
+    - say: 泵轴编号 122
+      any: ['泵轴.{0,10}{n:122}', '{n:122}.{0,6}泵轴']
+      numeric: true
+  evidence:
+    - quote: '122 泵轴'
+
+- id: tb_03
+  type: table_lookup
+  doc: '2'
+  expect: answer
+  tools: [lookup_table]
+  question: 'Wilo-WR 零件清单中，叶轮和轴的零件号分别是多少？'
+  reference: '叶轮的零件号是 230，轴的零件号是 210。'
+  facts:
+    - say: 叶轮 230
+      any: ['叶轮.{0,10}{n:230}', '{n:230}.{0,6}叶轮']
+      numeric: true
+    - say: 轴 210
+      any: ['(?<![叶长])轴(?!承|套).{0,10}{n:210}', '{n:210}.{0,6}轴']
+      numeric: true
+  evidence:
+    - quote: '210 轴'
+    - quote: '230 叶轮'
+
+- id: tb_04
+  type: table_lookup
+  doc: '4'
+  expect: answer
+  tools: [lookup_table]
+  question: '按 Model 3700 的运行故障排除表，机械密封严重泄漏可能有哪些原因？'
+  reference: '原因有：填料密封接头调节不当；填料函填料不当；机械密封部件磨损；机械密封过热；泵轴或泵轴套管上有刻痕。'
+  facts:
+    - say: 填料密封接头调节不当
+      any: ['接头调节不当', '接头.{0,4}调(节|整)']
+    - say: 填料函填料不当
+      any: ['填料函.{0,4}填料不当', '填料不当']
+    - say: 机械密封部件磨损
+      any: ['部件磨损', '密封.{0,6}磨损']
+    - say: 机械密封过热
+      any: ['密封.{0,4}过热']
+    - say: 泵轴或轴套上有刻痕
+      any: ['刻痕', '划痕']
+  evidence:
+    - quote: '机械密封严重泄漏'
+
+- id: tb_05
+  type: table_lookup
+  doc: '4'
+  expect: answer
+  tools: [lookup_table]
+  question: 'Model 3700 运行时电机所需电力过大，故障排除表列出了哪些原因？'
+  reference: '原因有：排放扬程低于额定点且抽运过多的液体；液体比预期更重；填料函填料过紧；转动部件相互摩擦；叶轮间隙过小。'
+  facts:
+    - say: 排放扬程低于额定点、抽运液体过多
+      any: ['扬程低于额定', '抽运过多']
+    - say: 液体比预期更重
+      any: ['比预期.{0,2}重', '比重']
+    - say: 填料函填料过紧
+      any: ['填料.{0,4}过紧']
+    - say: 转动部件相互摩擦
+      any: ['相互摩擦', '部件.{0,4}摩擦']
+    - say: 叶轮间隙过小
+      any: ['叶轮间隙过小', '间隙过小']
+  evidence:
+    - quote: '电机所需电力过度'
+
+- id: tb_06
+  type: table_lookup
+  doc: '3'
+  expect: answer
+  tools: [lookup_table]
+  question: 'Leader Ecoplus 泵过热保护开启、因过热停止，可能有哪些原因？'
+  reference: '原因有：电源与电机铭牌所载规格不一致（电压过高或过低）；叶轮被固体堵塞；泵的水温过高；泵空转或在输送龙头关闭的情况下运行时间过长。处理方法：拔下插头，消除导致过热的因素，等电机冷却后再启动。'
+  facts:
+    - say: 电源与铭牌规格不一致（电压过高或过低）
+      any: ['铭牌', '电压过(高|低)']
+    - say: 叶轮被固体堵塞
+      any: ['叶轮.{0,6}堵塞']
+    - say: 水温过高
+      any: ['水温.{0,2}过高']
+    - say: 空转或关闭龙头运行
+      any: ['空转', '龙头.{0,4}关闭']
+  evidence:
+    - quote: '过热保 护开启'
+
+- id: tb_07
+  type: table_lookup
+  doc: '2'
+  expect: answer
+  tools: [lookup_table]
+  question: 'Wilo-WR 管径 125mm 时，水泵允许承受的力 Fx、Fy、Fz 分别是多少 daN？'
+  reference: '管径 125mm 时：Fx 为 112 daN，Fy 为 125 daN，Fz 为 100 daN。'
+  facts:
+    - say: Fx 112 daN
+      any: ['fx.{0,8}{n:112}']
+      numeric: true
+    - say: Fy 125 daN
+      any: ['fy.{0,8}{n:125}']
+      numeric: true
+    - say: Fz 100 daN
+      any: ['fz.{0,8}{n:100}']
+      numeric: true
+  evidence:
+    - quote: 'Fx 90 112 135 175'
+
+# ============================================================================ 多步 / 跨手册
+
+- id: ms_01
+  type: multi_step
+  doc: ['1', '4']
+  expect: answer
+  tools: [search_manuals]
+  question: 'D 型泵和 Model 3700 对轴承温度的上限分别是多少？哪一个允许的轴承温度更高？'
+  reference: 'D 型泵：水泵轴承最高温度不应超过 75℃；Model 3700：绝大多数工作条件下轴承温度应介于 49°C（120°F）和 82°C（180°F）之间。Model 3700 允许的轴承温度更高。'
+  facts:
+    - say: D 型泵 75℃
+      any: ['{n:75}{C}']
+      numeric: true
+    - say: Model 3700 上限 82°C（180°F）
+      any: ['{n:82}{C}', '{n:180}{F}']
+      numeric: true
+    - say: 结论：Model 3700 更高
+      any: ['3700.{0,24}(更高|高于|较高|高一些|更宽)', '(更高|较高)的?是.{0,8}3700', 'd型.{0,16}(更低|较低|低于|更严)']
+  evidence:
+    - quote: '水泵轴承最高温度不应超过75℃'
+      doc: '1'
+    - quote: '轴承温度应该介于 49°C | 120°F 和 82°C | 180°F'
+      doc: '4'
+
+- id: ms_02
+  type: multi_step
+  doc: ['2', '4']
+  expect: answer
+  tools: [search_manuals]
+  question: 'Wilo-WR 和 Model 3700 对密封冲洗水（冲洗液）压力的要求分别是什么？'
+  reference: 'Wilo-WR：密封冲洗水压力至少比水泵的最大压力高 0.5bar；Model 3700（外部冲洗）：冲洗液压力必须比密封腔压力高出 0.35 到 1.01 kg/cm²（5 到 15 psi）。'
+  facts:
+    - say: Wilo-WR 至少比水泵最大压力高 0.5 bar
+      any: ['{n:0.5}bar']
+      numeric: true
+    - say: Model 3700 比密封腔压力高 0.35~1.01 kg/cm²（5~15 psi）
+      any: ['{n:0.35}(kgf?/cm2)?{to}{n:1.01}', '{n:5}(psi)?{to}{n:15}psi']
+      numeric: true
+  evidence:
+    - quote: '密封冲洗水压力至少比水泵的最大压力高0.5bar'
+      doc: '2'
+    - quote: '高出 0.35 到 1.01 kg'
+      doc: '4'
+
+- id: ms_03
+  type: multi_step
+  doc: '4'
+  expect: answer
+  tools: [convert_unit, check_value]
+  question: 'Model 3700 运行中测得轴承温度 85℃，换算成华氏度是多少？是否超出手册给出的正常范围？'
+  reference: '85℃ 约合 185°F。手册规定绝大多数工作条件下轴承温度应介于 49°C（120°F）和 82°C（180°F）之间，85℃ 超出了上限；轴承温度超过 82°C（180°F）时应使用 ISO 粘度级别 100 的润滑油。'
+  facts:
+    - say: 85℃ 约合 185°F
+      any: ['{n:185}{F}', '华氏{n:185}度']
+      numeric: true
+      calc: '85*9/5+32'
+    - say: 正常范围上限 82°C（180°F）
+      any: ['{n:82}{C}', '{n:180}{F}']
+      numeric: true
+    - say: 结论：超出范围
+      any: *exceed
+  evidence:
+    - quote: '轴承温度应该介于 49°C | 120°F 和 82°C | 180°F'
+
+- id: ms_04
+  type: multi_step
+  doc: ['1', '2']
+  expect: answer
+  tools: [search_manuals]
+  question: 'D 型泵长期停泵和 Wilo-WR 泵储存期间，分别多久盘一次车（转动转子）？'
+  reference: 'D 型泵长期停泵时每隔 15 天将转子旋转 180 度；Wilo-WR 储运期间每 2 周盘车一次，并使转子停留在不同角度。'
+  facts:
+    - say: D 型泵每隔 15 天
+      any: ['{n:15}天']
+      numeric: true
+    - say: 转子旋转 180 度
+      any: ['{n:180}(度|°)']
+      numeric: true
+    - say: Wilo-WR 每 2 周
+      any: ['{n:2}周', '两周', '二周']
+      numeric: true
+  evidence:
+    - quote: '每隔15天将转子旋转180度'
+      doc: '1'
+    - quote: '每2 周盘车一次'
+      doc: '2'
+
+- id: ms_05
+  type: multi_step
+  doc: ['1', '2']
+  expect: answer
+  tools: [search_manuals]
+  question: 'Wilo-WR 用百分表对中时的径向最大跳动，和 D 型泵两联轴器外圆上的不同心度允差，各是多少？哪个要求更严？'
+  reference: 'Wilo-WR 用百分表对中时径向最大跳动为 0.10mm（最佳值 0.05mm）；D 型泵两联轴器外圆上的不同心度允差为 0.1 毫米。两者的允许值相同，都是 0.1mm。'
+  facts:
+    - say: Wilo-WR 径向最大跳动 0.10mm
+      any: ['径向.{0,12}{n:0.1}{mm}']
+      numeric: true
+    - say: D 型泵不同心度允差 0.1mm
+      any: ['同心度.{0,12}{n:0.1}{mm}']
+      numeric: true
+    - say: 结论：两者相同
+      any: ['相同|一样|一致|相等|都是{n:0.1}']
+  evidence:
+    - quote: '径向最大跳动 0.10mm'
+      doc: '2'
+    - quote: '不同心度允差0.1毫米'
+      doc: '1'
+
+# ============================================================================ 手册没写的参数（应说明查不到）
+
+- id: rf_01
+  type: oos_in_domain
+  expect: refuse
+  question: 'Wilo-WR 泵运行时测得振动速度 4.5 mm/s，是否超出手册允许值？'
+  absent: ['mm/s', '振动速度', '振动值']
+  absent_in: '2'
+
+- id: rf_02
+  type: oos_in_domain
+  expect: refuse
+  question: 'D 型泵如果用的是机械密封，正常运行时允许泄漏量是多少？'
+  absent: ['机械密封']
+  absent_in: '1'
+
+- id: rf_03
+  type: oos_in_domain
+  expect: refuse
+  question: 'Leader Ecojet 泵的最大工作压力是多少 bar？换算成 MPa 是多少？'
+  absent: ['bar', 'mpa', '最大工作压力']
+  absent_in: '3'

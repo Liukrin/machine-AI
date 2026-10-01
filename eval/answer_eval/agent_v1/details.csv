@@ -1,0 +1,161 @@
+﻿题目ID,变体,划分,题型,手册,期望,行为,闸距离,证据命中,证据组数,事实答出,事实总数,数值答出,数值总数,完全答对,实质句数,无引用句数,评审有依据句数,评审无依据句数,答案数字数,找不到出处的数字数,引用样例手册,耗时ms,输入token,输出token,结束原因,模式,模型调用次数,用到的工具,工具报错次数,成本元(未命中计),问题
+d1_fact_01,main,test,fact,1,answer,answered,0.240737,1,1,3,3,3,3,是,2,0,2,0,5,0,,3497.8,2524,114,stop,agent,1,,0,0.00596,MD型煤矿用耐磨多级离心泵对输送的矿井水有什么限制？
+d1_fact_02,main,dev,fact,1,answer,answered,0.22395,1,1,2,2,0,0,是,2,0,2,0,6,0,,3382.5,2886,79,stop,agent,1,,0,0.006404,D型卧式多级离心泵配套电动机的防护等级和绝缘等级分别是什么？
+d1_fact_03,main,test,fact,1,answer,answered,0.334637,1,1,2,2,0,0,是,2,0,1,0,0,0,,3660.3,7149,208,stop,agent,2,search_manuals,0,0.015962,D型泵启动前手动盘车有什么要求？
+d1_fact_05,main,test,fact,1,answer,answered,0.257041,1,1,2,2,1,1,是,2,0,2,0,6,0,,1608.9,3114,84,stop,agent,1,,0,0.0069,D型泵润滑轴承用的锂基脂应该加多少？
+d1_fact_07,main,dev,fact,1,answer,answered,0.244849,1,1,3,3,1,1,是,1,0,1,0,2,0,,3452.1,3185,62,stop,agent,1,,0,0.006866,D型泵采用变频或软启动方式时，对启动时间和频率设置有什么要求？
+d1_fact_08,main,dev,fact,1,answer,answered,0.28573,1,1,2,2,1,1,是,4,0,3,1,8,0,,2243.5,2836,173,stop,agent,1,,0,0.007056,D型泵由自冲洗改为外冲洗结构时，冲洗水的压力应满足什么要求？
+d1_fact_09,main,test,fact,1,answer,answered,0.323303,1,1,3,3,0,0,是,3,0,3,0,3,0,,2153.8,3019,123,stop,agent,1,,0,0.007022,煤矿井下配用防爆电机时，哪些系列的电机能用，哪些不能用？
+d1_fact_10,main,test,fact,1,answer,answered,0.241935,1,1,2,2,0,0,是,3,0,2,1,1,0,,2200.8,3208,100,stop,agent,1,,0,0.007216,D型泵调整泵和电机两个联轴器的间隙之前，必须先做什么？为什么？
+d1_fact_11,main,dev,fact,1,answer,answered,0.301668,1,1,2,2,2,2,是,3,0,1,0,5,0,,2000.6,2847,121,stop,agent,1,,0,0.006662,D型泵机组安装时校正水平，推荐的不平度是多少？
+d1_fact_12,main,dev,fact,1,answer,answered,0.319112,1,1,1,1,0,0,是,1,0,1,0,0,0,,1229.4,3300,22,stop,agent,1,,0,0.006776,从联轴器端向泵看，D型泵的旋转方向是什么？
+d1_fact_13,main,dev,fact,1,answer,answered,0.257897,1,1,1,1,1,1,是,5,1,4,1,4,1,,1890.3,3199,153,stop,agent,1,,0,0.007622,计算水泵最大吸上高度时，安全余量一般取多少？
+d1_proc_01,main,test,procedure,1,answer,answered,0.200424,1,1,3,3,0,0,是,4,0,4,0,2,0,,4417.2,7412,296,stop,agent,2,search_manuals,0,0.017192,D型多级离心泵停止运转时应按什么顺序操作？
+d1_proc_02,main,dev,procedure,1,answer,answered,0.278084,1,1,3,3,0,0,是,5,0,5,0,0,0,,2117.9,3007,253,stop,agent,1,,0,0.008038,D型泵起动时，出水闸阀和真空表、压力表的阀门应该怎么操作？
+d1_proc_03,main,dev,procedure,1,answer,answered,0.257964,1,1,2,2,1,1,是,7,4,7,0,11,0,,2695.6,2894,304,stop,agent,1,,0,0.00822,D型泵稀油润滑的轴承箱用什么润滑油？拆下油杯后往油杯里加多少油？
+d1_table_01,main,test,table,1,answer,answered,0.319893,1,1,3,3,0,0,是,5,4,4,0,7,0,,2165.4,3552,176,stop,agent,1,,0,0.008512,D型泵不吸水，而且真空表显示高度真空，可能是什么原因，怎么消除？
+d1_table_02,main,dev,table,1,answer,answered,0.300424,1,1,4,4,0,0,是,5,4,3,0,6,0,,1992.5,3445,144,stop,agent,1,,0,0.008042,D型泵消耗的功率过大，有哪些原因和消除方法？
+d1_table_03,main,dev,table,1,answer,answered,0.323001,1,1,1,1,0,0,是,6,3,6,0,20,0,,2331.2,3510,245,stop,agent,1,,0,0.00898,MD型泵在单级扬程小于80m的配置下，叶轮用的是什么材料？
+d1_cross_01,main,dev,cross_chunk,1,answer,answered,0.253264,2,2,3,3,1,1,是,5,3,5,0,10,0,,5152.1,8354,283,stop,agent,2,lookup_table、search_manuals,0,0.018972,D型泵运转时水泵轴承的最高温度不应超过多少？如果轴承过热，常见原因有哪些？
+d1_coll_01,main,test,colloquial,1,answer,answered,0.346817,1,1,4,4,0,0,是,3,2,3,0,8,0,,4331.9,7419,309,stop,agent,2,lookup_table、search_manuals,0,0.01731,D型泵开起来抖得厉害，可能是哪儿出了毛病？
+d1_coll_02,main,dev,colloquial,1,answer,answered,0.345197,1,1,2,2,1,1,是,3,0,3,0,2,0,,5594.8,7936,293,stop,agent,2,search_manuals,0,0.018216,D型泵要停很久不用，里面的水用不用放掉？
+d2_fact_02,main,dev,fact,2,answer,answered,0.344563,1,1,1,1,1,1,是,1,0,1,0,2,0,,2335.5,2561,53,stop,agent,1,,0,0.005546,Wilo-WR 的混凝土基础，高度方向距底座底面应留多少？
+d2_fact_03,main,test,fact,2,answer,answered,0.344694,1,1,1,1,1,1,是,2,0,2,0,1,0,,1714.2,2955,84,stop,agent,1,,0,0.006582,Wilo-WR 卧式泵组用水平仪调节水平时，允许的误差幅度是多少？
+d2_fact_04,main,test,fact,2,answer,answered,0.274984,1,1,2,2,2,2,是,3,1,3,0,5,0,,2009.3,2679,119,stop,agent,1,,0,0.00631,Wilo-WR 用百分表对中时，轴向和径向的最大跳动分别是多少？
+d2_fact_06,main,dev,fact,2,answer,answered,0.313495,1,1,1,1,1,1,是,1,0,1,0,1,0,,1717.2,2991,36,stop,agent,1,,0,0.00627,Wilo-WR 吸上工况的进水管路布置，倾角至少是多少？
+d2_fact_07,main,test,fact,2,answer,answered,0.209481,1,1,1,1,1,1,是,1,0,1,0,1,0,,1222.9,2547,34,stop,agent,1,,0,0.005366,Wilo-WR 水泵带双向机械密封时，蓄压器应装在多高的位置？
+d2_fact_09,main,dev,fact,2,answer,answered,0.244378,1,1,3,3,0,0,是,6,5,6,0,12,0,,2340.9,2740,239,stop,agent,1,,0,0.007392,Wilo-WR 轴承应使用什么类型的润滑脂？推荐哪些牌号？
+d2_fact_10,main,dev,fact,2,answer,answered,0.356539,1,1,1,1,1,1,是,2,0,2,0,4,0,,3177.6,2569,73,stop,agent,1,,0,0.005722,Wilo-WR 采用填料密封时，正常的泄漏量应该是多少？
+d2_fact_11,main,test,fact,2,answer,answered,0.222354,1,1,2,2,0,0,是,6,4,6,0,3,0,,1978.3,3084,199,stop,agent,1,,0,0.00776,Wilo-WR 输送气体介质时应采用哪种轴封？如果用机械密封要注意什么？
+d2_fact_12,main,test,fact,2,answer,answered,0.268905,1,1,1,1,0,0,是,1,0,1,0,0,0,,1675.6,2702,49,stop,agent,1,,0,0.005796,Wilo-WR 水泵检查转向时发现反转了，应该怎么处理？
+d2_fact_13,main,dev,fact,2,answer,answered,0.27659,1,1,2,2,0,0,是,1,0,1,0,0,0,,1848.4,2918,67,stop,agent,1,,0,0.006372,为什么 Wilo-WR 不允许在进出水阀门都关闭的情况下启动泵？
+d2_fact_14,main,dev,fact,2,answer,answered,0.232435,1,1,1,1,1,1,是,1,0,1,0,1,0,,2101.1,2968,30,stop,agent,1,,0,0.006176,Wilo-WR 联轴器对中调整高度误差时，多长以下的底座只需在电机与水泵的范围内调节？
+d2_fact_15,main,test,fact,2,answer,answered,0.349463,1,1,1,1,0,0,是,1,0,1,0,0,0,,1638.2,2814,29,stop,agent,1,,0,0.00586,Wilo-WR 进水管路上的滤网到池底的距离至少应为多少？
+d2_proc_01,main,test,procedure,2,answer,answered,0.291819,1,1,3,3,0,0,是,5,0,5,0,0,0,,1783.4,2538,125,stop,agent,1,,0,0.006076,Wilo-WR 停泵时应按哪些步骤操作？
+d2_proc_02,main,test,procedure,2,answer,answered,0.363626,1,1,5,5,0,0,是,4,2,4,0,0,0,,2180.8,2988,180,stop,agent,1,,0,0.007416,Wilo-WR 更换填料的操作步骤是什么？
+d2_proc_03,main,dev,procedure,2,answer,answered,0.309654,1,1,3,3,0,0,是,6,0,6,0,1,0,,6327.5,2880,207,stop,agent,1,,0,0.007416,Wilo-WR 注水排气时，出水阀门和进水阀门应处于什么状态？泵内的空气从哪里排出？
+d2_table_01,main,dev,table,2,answer,answered,0.349885,1,1,1,1,1,1,是,1,0,1,0,4,0,,1328.1,2828,53,stop,agent,1,,0,0.00608,Wilo-WR 爪型联轴器外径为 160~225mm 时，两个半联轴节端面的间距 C 应为多少？
+d2_table_03,main,dev,table,2,answer,answered,0.253677,1,1,1,1,1,1,是,1,0,1,0,4,0,,2671.7,2630,53,stop,agent,1,,0,0.005684,Wilo-WR 壳体材质为 GGG 时，水泵的最大承压是多少？
+d2_table_04,main,test,table,2,answer,answered,0.256452,1,1,1,1,1,1,是,11,9,10,0,13,0,,1839.1,3116,190,stop,agent,1,,0,0.007752,Wilo-WR 管径为 150mm 时，水泵允许承受的合力 ∑F 是多少？
+d2_table_05,main,test,table,2,answer,answered,0.392769,1,1,1,1,0,0,是,1,0,1,0,1,0,,1478.6,3643,31,stop,agent,1,,0,0.007534,Wilo-WR 的零件清单里，零件号 458 是什么零件？
+d2_table_06,main,test,table,2,answer,answered,0.312458,1,1,7,7,0,0,是,10,8,8,1,4,0,,4111.1,7251,341,stop,agent,2,read_section、search_manuals,0,0.01723,按 Wilo-WR 的故障表，电机过载可能是哪些原因造成的？
+d2_cross_01,main,dev,cross_chunk,2,answer,answered,0.307899,2,2,2,2,2,2,是,3,0,3,0,3,1,,2909.0,3006,101,stop,agent,1,,0,0.00682,Wilo-WR 的进水管路（吸上工况）和出水管路，最大流速分别是多少？
+d2_cross_02,main,test,cross_chunk,2,answer,answered,0.29019,2,2,2,2,2,2,是,2,0,2,0,3,0,,1599.9,2973,68,stop,agent,1,,0,0.00649,Wilo-WR 的混凝土基础长度要比底座长多少？泵组对中紧固后浇注底座，凝固时间至少要多久？
+d2_cross_03,main,dev,cross_chunk,2,answer,answered,0.261756,2,2,2,2,1,1,是,6,4,6,0,17,0,,3345.2,2835,155,stop,agent,1,,0,0.00691,Wilo-WR 立式泵（型式V）安装时，两联轴节的轴向间隙按哪张表调整？联轴器外径 250~400mm 时间距是多少？
+d2_coll_01,main,test,colloquial,2,answer,answered,0.286568,1,1,1,1,1,1,是,4,1,3,0,2,0,,1990.1,2958,154,stop,agent,1,,0,0.007148,Wilo 这台泵的密封冲洗水，压力得调到多高才行？
+d2_coll_02,main,dev,colloquial,2,answer,answered,0.364587,1,1,2,2,1,1,是,3,1,2,0,7,0,,1992.9,2578,102,stop,agent,1,,0,0.005972,Wilo-WR 的轴承摸着发烫，温度到多少算超标？
+d2_coll_03,main,dev,colloquial,2,answer,answered,0.296731,1,1,4,4,1,1,是,7,1,7,0,5,0,,2336.2,2458,203,stop,agent,1,,0,0.00654,Wilo 的泵要在仓库里放三个多月，存放上要注意些啥？
+d3_fact_01,main,dev,fact,3,answer,answered,0.181249,1,1,2,2,0,0,是,4,1,3,0,0,0,,1786.5,3032,141,stop,agent,1,,0,0.007192,Leader 离心泵上的 Hydrotronic 控制器有什么作用？
+d3_fact_02,main,test,fact,3,answer,answered,0.30441,1,1,2,2,1,1,是,1,0,1,0,1,0,,1513.9,2710,44,stop,agent,1,,0,0.005772,Leader 离心泵在预混添加剂的情况下使用，多久要用清水冲洗一次？
+d3_fact_03,main,dev,fact,3,answer,answered,0.169631,1,1,2,2,0,0,是,2,1,1,0,6,2,,1780.9,3058,73,stop,agent,1,,0,0.0067,Leader 离心泵没有启动时要检查复位开关，哪些型号有这个开关，装在什么位置？
+d3_fact_04,main,test,fact,3,answer,answered,0.288007,1,1,2,2,0,0,是,4,0,4,0,0,0,,1718.3,3417,171,stop,agent,1,,0,0.008202,Leader 潜水泵的 Ecosub、Verty-Go 和 Ecodiver 三种类型各自适合什么工况？
+d3_fact_05,main,test,fact,3,answer,answered,0.226973,1,1,1,1,0,0,是,3,1,2,0,0,0,,1929.5,2986,112,stop,agent,1,,0,0.006868,Leader 离心泵从蓄水池底部的出水口抽水时，管路上需要加装什么？
+d3_fact_06,main,test,fact,3,answer,answered,0.303886,1,1,1,1,0,0,是,2,0,1,0,0,0,,1883.0,2833,93,stop,agent,1,,0,0.00641,Leader 离心泵所在位置的温度可能降到冰点以下时，应该怎么处理？
+d3_fact_07,main,dev,fact,3,answer,answered,0.310512,1,1,1,1,0,0,是,3,0,3,0,0,0,,1870.6,2899,93,stop,agent,1,,0,0.006542,Leader 潜水泵的进水口区域多久需要清洁一次？
+d3_table_01,main,dev,table,3,answer,answered,0.263762,1,1,2,2,0,0,是,4,2,3,0,5,0,,2339.7,3123,226,stop,agent,1,,0,0.008054,Leader Ecotronic 泵不停地启动又停止，是什么原因，怎么解决？
+d3_table_02,main,test,table,3,answer,answered,0.27976,1,1,3,3,0,0,是,10,9,9,0,7,0,,2631.3,2939,302,stop,agent,1,,0,0.008294,Leader Ecoplus 泵能转动但是不出水，可能是什么原因？
+d3_coll_01,main,dev,colloquial,3,answer,answered,0.389195,1,1,3,3,0,0,是,10,2,9,0,8,0,,2898.3,3014,368,stop,agent,1,,0,0.008972,家里那台 Ecojet 插上电一点反应都没有，咋整？
+d3_coll_02,main,test,colloquial,3,answer,answered,0.341946,1,1,2,2,0,0,是,2,0,1,0,0,0,,1852.1,3022,112,stop,agent,1,,0,0.00694,Leader 潜水泵有一截露在水面上，还能接着开吗？
+d4_fact_04,main,test,fact,4,answer,answered,0.294845,1,1,2,2,2,2,是,2,0,2,0,5,0,,1820.4,3074,102,stop,agent,1,,0,0.006964,Model 3700 用顶推螺栓安装底板时，底板与基础表面之间的距离应控制在什么范围？
+d4_fact_05,main,dev,fact,4,answer,answered,0.266178,1,1,2,2,2,2,是,3,0,2,0,10,1,,1738.1,3052,117,stop,agent,1,,0,0.00704,Model 3700 调平驱动机安装垫后，正确的水平测量值和底板两侧的最大差异分别是多少？
+d4_fact_06,main,dev,fact,4,answer,answered,0.327741,1,1,2,2,0,0,是,1,0,1,0,1,0,,1521.3,2378,70,stop,agent,1,,0,0.005316,Model 3700 手册提到通常使用哪三种校准方法？
+d4_fact_07,main,test,fact,4,answer,answered,0.290564,1,1,3,3,0,0,是,4,0,3,0,3,1,,2085.8,2762,82,stop,agent,1,,0,0.00618,Model 3700 在哪些情况下必须执行校准检查？
+d4_fact_08,main,test,fact,4,answer,answered,0.327377,1,1,1,1,1,1,是,2,0,2,0,5,0,,2039.7,2977,118,stop,agent,1,,0,0.006898,Model 3700 由电机驱动时，电机轴初始（冷态）平行垂直对齐应比泵轴低多少？
+d4_fact_09,main,dev,fact,4,answer,answered,0.218506,1,1,1,1,1,1,是,2,0,2,0,3,0,,1951.8,3118,114,stop,agent,1,,0,0.007148,Model 3700 用千分表检查最终校准时，工作温度下千分表的总读数（T.I.R.）不超过多少才算校准正确？
+d4_fact_11,main,dev,fact,4,answer,answered,0.273751,1,1,1,1,1,1,是,2,0,2,0,5,0,,1815.3,2893,58,stop,agent,1,,0,0.00625,Model 3700 启动时，泵的温度变化每分钟不能超过多少？
+d4_fact_12,main,test,fact,4,answer,answered,0.216106,1,1,2,2,2,2,是,5,1,5,0,11,0,,1955.4,2765,182,stop,agent,1,,0,0.006986,Model 3700 抽运的液体温度超过多少时，需要在操作前先加热泵？要保温多久？
+d4_fact_13,main,dev,fact,4,answer,answered,0.156942,1,1,3,3,3,3,是,4,1,4,0,19,1,,3885.5,2769,188,stop,agent,1,,0,0.007042,Model 3700 在绝大多数工作条件下，轴承温度应处于什么范围？应使用什么粘度等级的润滑油？
+d4_fact_16,main,dev,fact,4,answer,answered,0.379037,1,1,4,4,0,0,是,3,1,3,0,5,0,,4949.9,2569,147,stop,agent,1,,0,0.006314,Model 3700 的年度检查包括哪些项目？
+d4_fact_17,main,test,fact,4,answer,answered,0.276273,1,1,2,2,0,0,是,2,0,2,0,7,0,,1635.6,2679,98,stop,agent,1,,0,0.006142,Model 3700 的叶轮平衡应达到什么标准？
+d4_fact_18,main,dev,fact,4,answer,answered,0.230321,1,1,1,1,1,1,是,2,0,2,0,3,0,,1653.8,2509,85,stop,agent,1,,0,0.005698,Model 3700 检查轴的直度时，伸出（跳动）超过多少就要更换轴？
+d4_fact_19,main,dev,fact,4,answer,answered,0.277232,1,1,1,1,1,1,是,1,0,1,0,4,0,,1913.4,2708,54,stop,agent,1,,0,0.005848,Model 3700 安装新的叶轮磨损环之前，要把它加热到多少度？
+d4_fact_20,main,test,fact,4,answer,answered,0.226992,1,1,1,1,1,1,是,6,4,6,0,5,0,,2025.7,2624,148,stop,agent,1,,0,0.006432,Model 3700 叶轮磨损环的伸出（跳动）超过多少时需要排查处理？
+d4_fact_21,main,dev,fact,4,answer,answered,0.21729,1,1,1,1,1,1,是,3,0,3,0,3,0,,3156.1,2575,101,stop,agent,1,,0,0.005958,Model 3700 把轴承装配到轴上之前，要用感应加热器把轴承预热到多少度？
+d4_fact_22,main,dev,fact,4,answer,answered,0.266205,1,1,1,1,1,1,是,2,0,2,0,5,0,,3019.4,2704,143,stop,agent,1,,0,0.006552,Model 3700 组装轴承箱时，轴端余隙（总行程）应在什么范围内？
+d4_fact_23,main,test,fact,4,answer,answered,0.238344,1,1,2,2,0,0,是,2,0,2,0,7,0,,1868.7,2721,83,stop,agent,1,,0,0.006106,Model 3700 的压力边界硬件（如泵壳螺栓、压盖螺栓）螺纹上应使用什么润滑剂？
+d4_fact_25,main,test,fact,4,answer,answered,0.34685,1,1,2,2,0,0,是,3,0,3,0,1,0,,1670.9,2483,105,stop,agent,1,,0,0.005806,Model 3700 的哪些型号有两个油环，哪些只有一个？
+d4_fact_26,main,test,fact,4,answer,answered,0.299554,1,1,2,2,0,0,是,3,1,3,0,1,0,,1574.2,2285,97,stop,agent,1,,0,0.005346,Model 3700 机械密封的使用寿命大概是多久？
+d4_fact_27,main,dev,fact,4,answer,answered,0.240527,1,1,4,4,0,0,是,3,1,3,0,1,0,,1937.0,2435,107,stop,agent,1,,0,0.005726,Model 3700 的保修不包括哪些原因造成的故障？
+d4_fact_28,main,test,fact,4,answer,answered,0.317838,1,1,1,1,1,1,是,2,0,2,0,5,0,,1992.5,3146,124,stop,agent,1,,0,0.007284,Model 3700 安装推力反向器风扇时，它和推力轴承端盖之间应留多大距离？
+d4_fact_29,main,test,fact,4,answer,answered,0.233908,1,1,4,4,0,0,是,5,3,5,0,5,0,,2118.9,2853,232,stop,agent,1,,0,0.007562,Model 3700 接合泵壳（打定位销）需要准备哪些工具？
+d4_proc_01,main,dev,procedure,4,answer,answered,0.306617,1,1,5,5,0,0,是,20,1,19,1,10,1,,16864.3,6590,747,stop,agent,2,read_section,0,0.019156,Model 3700 起动泵的操作步骤是什么？
+d4_proc_02,main,dev,procedure,4,answer,answered,0.207402,1,1,3,3,0,0,是,3,2,3,0,4,1,,3113.5,2887,105,stop,agent,1,,0,0.006614,Model 3700 在抽吸源高于泵的情况下，灌泵的步骤是什么？
+d4_proc_03,main,test,procedure,4,answer,answered,0.264587,1,1,5,5,1,1,是,11,0,11,0,9,0,,2239.1,2818,340,stop,agent,1,,0,0.008356,Model 3700 底板灌浆的主要步骤有哪些？灌完后要等多久？
+d4_proc_04,main,dev,procedure,4,answer,answered,0.261544,1,1,4,4,0,0,是,10,3,9,0,7,0,,1943.6,2436,210,stop,agent,1,,0,0.006552,Model 3700/3710 卸下叶轮的步骤是什么？
+d4_proc_05,main,test,procedure,4,answer,answered,0.330358,1,1,2,2,0,0,是,5,0,5,0,6,0,,1988.2,2582,189,stop,agent,1,,0,0.006676,Model 3700 停用一段时间后重新投用，轴承要怎么处理？
+d4_table_00,main,dev,table,4,answer,answered,0.252439,1,1,2,2,1,1,是,5,4,5,0,7,1,,1938.1,2561,168,stop,agent,1,,0,0.006466,按 Model 3700 手册，化学或危险液体溅入眼睛后应如何处理？
+d4_table_01,main,test,table,4,answer,answered,0.238312,1,1,3,3,0,0,是,12,8,12,0,7,0,,4182.3,6425,444,stop,agent,2,read_section,0,0.016402,Model 3700 做垂直校准的角度调整时，千分表读数为负说明什么？应如何调整？
+d4_table_02,main,dev,table,4,answer,answered,0.276056,1,1,1,1,1,1,是,9,7,9,0,24,0,,2581.6,2578,212,stop,agent,1,,0,0.006852,Model 3700 的 LX 轴承架需要加多少润滑油？
+d4_table_03,main,dev,table,4,answer,answered,0.270685,1,1,1,1,0,0,是,1,0,1,0,1,0,,2263.5,2883,54,stop,agent,1,,0,0.006198,Model 3700 的抽吸管道上，泵入口法兰和最近的弯管之间至少要隔多远？
+d4_table_04,main,test,table,4,answer,answered,0.312163,1,1,2,2,2,2,是,4,1,3,0,12,1,,1940.9,2753,152,stop,agent,1,,0,0.006722,Model 3700 采用外部冲洗的密封冲洗方式时，冲洗液的压力和注入速率有什么要求？
+d4_table_05,main,test,table,4,answer,answered,0.21933,1,1,2,2,2,2,是,5,4,5,0,20,0,,2168.3,2889,223,stop,agent,1,,0,0.007562,Model 3700 的叶轮叶片磨损到什么程度时需要更换叶轮？
+d4_table_06,main,test,table,4,answer,answered,0.264438,1,1,2,2,0,0,是,3,2,3,0,9,0,,2029.7,2674,112,stop,agent,1,,0,0.006244,Model 3700 的 XLX 组应配用什么型号的径向轴承和止推轴承？
+d4_table_07,main,dev,table,4,answer,answered,0.216572,1,1,1,1,1,1,是,2,0,2,0,6,0,,2366.6,3006,88,stop,agent,1,,0,0.006716,Model 3700 叶轮磨损环直径在 150 至 174.99 毫米之间时，最小直径间隙是多少？
+d4_table_08,main,dev,table,4,answer,answered,0.231114,1,1,1,1,1,1,是,2,0,2,0,5,0,,2905.5,2627,89,stop,agent,1,,0,0.005966,Model 3700 的密封腔盖表面磨损、损坏或腐蚀到多深时需要更换？
+d4_table_09,main,test,table,4,answer,answered,0.275389,1,1,1,1,1,1,是,3,0,3,0,14,0,,2064.7,2979,205,stop,agent,1,,0,0.007598,Model 3700 检查密封腔面伸出时，SA 组的最大允许总指示读数是多少？
+d4_table_10,main,dev,table,4,answer,answered,0.288735,1,1,1,1,1,1,是,3,0,2,0,13,0,,3088.9,4823,158,stop,agent,1,,0,0.01091,Model 3700 泵壳螺栓（项目 356A）规格为 5/8 英寸时，最大扭矩是多少？
+d4_table_11,main,test,table,4,answer,answered,0.315191,1,1,3,3,0,0,是,5,4,4,0,1,0,,2506.5,3946,174,stop,agent,1,,0,0.009284,Model 3700 泵起动后又停止抽运，可能是什么原因，怎么解决？
+d4_table_12,main,dev,table,4,answer,answered,0.282067,1,1,3,3,0,0,是,5,4,4,0,4,1,,4039.7,8071,267,stop,agent,2,lookup_table、search_manuals,0,0.018278,按 Model 3700 的故障排除表，轴承运转过热有哪些原因和解决方法？
+d4_table_13,main,dev,table,4,answer,answered,0.268254,1,1,1,1,0,0,是,5,2,5,0,13,0,,1840.3,4409,147,stop,agent,1,,0,0.009994,Goulds 泵材料代码 2229 对应的是什么材料？
+d4_table_14,main,test,table,4,answer,answered,0.375239,1,1,1,1,1,1,是,4,2,4,0,30,0,,2067.5,2618,172,stop,agent,1,,0,0.006612,Model 3700 的 ATEX 温度分类 T4 对应的最大允许表面温度是多少？
+d4_table_15,main,dev,table,4,answer,answered,0.297109,1,1,1,1,0,0,是,1,0,1,0,4,0,,1524.3,3695,38,stop,agent,1,,0,0.007694,Model 3700 的泵壳垫圈（项目 351）是什么材料？
+d4_table_16,main,test,table,4,answer,answered,0.377954,1,1,1,1,0,0,是,3,2,3,0,21,1,,2098.5,2724,133,stop,agent,1,,0,0.006512,ITT Goulds Pumps 亚太地区办公室的电话是多少？
+d4_table_17,main,test,table,4,answer,answered,0.332981,1,1,2,2,1,1,是,2,0,2,0,3,0,,1942.4,2695,91,stop,agent,1,,0,0.006118,Model 3700 采用公制单位的铭牌上，HYDRO PRESS 字段表示什么？
+d4_table_18,main,dev,table,4,answer,answered,0.266308,1,1,3,3,0,0,是,2,0,2,0,7,0,,2058.7,2800,140,stop,agent,1,,0,0.00672,Model 3700 铭牌上的泵规格（例如 2x3-8）是按什么规则表示的？
+d4_cross_01,main,dev,cross_chunk,4,answer,answered,0.266114,2,2,2,2,1,1,是,4,2,4,0,6,0,,3158.8,2723,125,stop,agent,1,,0,0.006446,Model 3700 的 SA 泵有几个油环？它的轴承架油量是多少？
+d4_cross_02,main,dev,cross_chunk,4,answer,answered,0.287948,2,2,2,2,1,1,是,4,0,4,0,4,0,,2452.9,2608,162,stop,agent,1,,0,0.006512,Model 3700 对基础的重量有什么要求？准备基础安装时，基础顶部要削掉多少？
+d4_cross_03,main,test,cross_chunk,4,answer,answered,0.262543,2,2,2,2,1,1,是,5,0,5,0,20,0,,3573.0,6328,341,stop,agent,2,lookup_table、search_manuals,0,0.015384,Model 3700 的 XXL 组用什么型号的止推轴承？轴承架油量是多少？
+d4_cross_04,main,test,cross_chunk,4,answer,answered,0.314221,2,2,4,4,0,0,是,5,4,5,0,5,0,,1792.8,2461,151,stop,agent,1,,0,0.00613,Model 3700 的维护检查分哪几类？其中每三个月要做哪些检查？
+d4_coll_01,main,test,colloquial,4,answer,answered,0.311289,1,1,2,2,2,2,是,3,0,2,0,9,0,,2234.2,2509,131,stop,agent,1,,0,0.006066,3700 这台泵的润滑油多久换一回？
+d4_coll_02,main,test,colloquial,4,answer,answered,0.379355,1,1,1,2,0,0,否,2,0,2,0,1,0,,1754.1,2860,78,stop,agent,1,,0,0.006344,装 3700 的轴承时，能不能拿火烤一下好装进去？
+d4_coll_03,main,dev,colloquial,4,answer,answered,0.486975,1,1,2,2,0,0,是,27,21,24,0,5,0,,14565.9,8700,896,stop,agent,2,search_manuals,0,0.024568,3700 开起来以后压力半天上不去，该咋办？
+x_cross_01,main,test,cross_chunk,1+2,answer,answered,0.25876,2,2,2,2,2,2,是,7,4,6,0,18,0,,2426.4,3093,230,stop,agent,1,,0,0.008026,D型泵分体安装时，泵联轴器与电机联轴器之间要保留多大间隙？Wilo-WR 爪型联轴器外径 80~140mm 时，端面间距又是多少？
+mt_01,main,test,multi_turn,2,answer,answered,0.500713,1,1,2,2,2,2,是,6,0,6,0,4,0,,1930.3,2793,154,stop,agent,1,,0,0.006818,那带油嘴的呢？
+mt_01,standalone,test,multi_turn,2,answer,answered,0.241192,1,1,2,2,2,2,是,6,0,6,0,7,0,,1894.7,2753,161,stop,agent,1,,0,0.006794,Wilo-WR 轴承室带油嘴时，多久加一次润滑脂，每次加多少？
+mt_02,main,dev,multi_turn,1,answer,answered,0.425937,1,1,4,4,0,0,是,6,5,4,1,4,0,,2561.7,3439,129,stop,agent,1,,0,0.00791,要是压力表有压力，但就是不出水呢？
+mt_02,standalone,dev,multi_turn,1,answer,answered,0.31963,1,1,4,4,0,0,是,6,4,6,0,8,0,,4337.1,8133,338,stop,agent,2,lookup_table、search_manuals,0,0.01897,D型泵不出水，但压力表显示有压力，可能是什么原因？
+mt_03,main,dev,multi_turn,4,answer,answered,0.528419,1,1,2,2,0,0,是,1,0,1,0,3,0,,1564.9,2619,44,stop,agent,1,,0,0.00559,MX 组呢？
+mt_03,standalone,dev,multi_turn,4,answer,answered,0.282541,1,1,2,2,0,0,是,1,0,1,0,3,0,,1787.0,2613,44,stop,agent,1,,0,0.005578,Model 3700 的 MX 组用什么型号的径向轴承和止推轴承？
+mt_04,main,test,multi_turn,3,answer,answered,0.544049,1,1,2,2,0,0,是,1,0,1,0,0,0,,1485.2,2894,27,stop,agent,1,,0,0.006004,如果是一直亮着不闪呢？
+mt_04,standalone,test,multi_turn,3,answer,answered,0.370793,1,1,2,2,0,0,是,3,0,2,1,1,1,,2077.9,2979,79,stop,agent,1,,0,0.00659,Leader Ecotronic 的红色 LED 指示灯常亮是什么原因，怎么解决？
+mt_05,main,dev,multi_turn,4,answer,answered,0.416161,1,1,4,4,0,0,是,8,5,8,0,18,0,,4195.9,5940,390,stop,agent,2,lookup_table、search_manuals,0,0.015,那应该加什么牌子的油？
+mt_05,standalone,dev,multi_turn,4,answer,answered,0.236147,1,1,4,4,0,0,是,6,5,6,0,13,0,,1677.2,2551,170,stop,agent,1,,0,0.006462,Model 3700 轴承润滑可接受的润滑油有哪些品牌和型号？
+mt_06,main,dev,multi_turn,2,answer,answered,0.449018,1,1,1,1,1,1,是,1,0,1,0,2,0,,1798.6,3156,26,stop,agent,1,,0,0.00652,管径 200 的呢？
+mt_06,standalone,dev,multi_turn,2,answer,answered,0.26873,1,1,1,1,1,1,是,11,9,10,0,14,0,,1986.8,3087,198,stop,agent,1,,0,0.007758,Wilo-WR 管径 200mm 时，水泵允许的合力 ∑F 是多少？
+mt_07,main,test,multi_turn,4,answer,answered,0.537065,1,1,2,2,0,0,是,1,0,1,0,1,0,,1646.1,2559,73,stop,agent,1,,0,0.005702,那要是只放一两个月呢？
+mt_07,standalone,test,multi_turn,4,answer,answered,0.363762,1,1,2,2,0,0,是,3,0,3,0,1,0,,2097.6,2776,121,stop,agent,1,,0,0.00652,Model 3700 短期存放（少于六个月）有什么存储要求？
+mt_08,main,test,multi_turn,4,answer,answered,0.379988,1,1,1,1,0,0,是,2,0,2,0,4,1,,1902.8,3044,85,stop,agent,1,,0,0.006768,间隙大到什么程度就得换了？
+mt_08,standalone,test,multi_turn,4,answer,answered,0.147916,1,1,1,1,0,0,是,19,16,19,0,97,7,,2935.0,2969,597,stop,agent,1,,0,0.010714,Model 3700 的磨损环直径间隙超过多少时需要更换磨损环？
+mt_09,main,test,multi_turn,1,answer,answered,0.454854,1,1,3,3,0,0,是,5,4,3,0,6,0,,2150.5,5091,135,stop,agent,1,,0,0.011262,要是流量不够、扬程也太低呢？
+mt_09,standalone,test,multi_turn,1,answer,answered,0.301754,1,1,3,3,0,0,是,5,4,4,0,8,0,,2395.3,4231,187,stop,agent,1,,0,0.009958,D型泵流量不足或扬程太低，可能是什么原因，怎么消除？
+mt_10,main,dev,multi_turn,2,answer,answered,0.497016,1,1,1,1,1,1,是,1,0,1,0,6,0,,1580.2,3095,44,stop,agent,1,,0,0.006542,直径 150 的呢？
+mt_10,standalone,dev,multi_turn,2,answer,answered,0.244634,1,1,1,1,1,1,是,5,3,4,0,16,0,,1696.0,2684,144,stop,agent,1,,0,0.00652,Wilo-WR 出水管路名义直径 150 时，轴封水量是多少？
+oos_adj_01,main,test,oos_adjacent,,refuse,refused_model,0.369328,,,,,,,,0,0,,,0,0,,1921.6,2910,73,stop,agent,1,,0,0.006404,螺杆空压机排气温度过高怎么处理？
+oos_adj_02,main,dev,oos_adjacent,,refuse,refused_model,0.340913,,,,,,,,0,0,,,0,0,,1764.8,2600,112,stop,agent,1,,0,0.006096,挖掘机液压泵的工作压力一般是多少？
+oos_adj_03,main,test,oos_adjacent,,refuse,refused_model,0.346287,,,,,,,,0,0,,,0,0,,1901.2,2650,48,stop,agent,1,,0,0.005684,离心风机轴承振动的允许值是多少？
+oos_adj_04,main,test,oos_adjacent,,refuse,answered,0.317618,,,,,,,,1,0,1,0,3,0,,2055.1,2533,99,stop,agent,1,,0,0.005858,减速机齿轮箱的润滑油多久更换一次？
+oos_adj_05,main,dev,oos_adjacent,,refuse,refused_model,0.349516,,,,,,,,0,0,,,0,0,,1660.3,2390,71,stop,agent,1,,0,0.005348,柴油发电机启动不了应该怎么排查？
+oos_adj_06,main,test,oos_adjacent,,refuse,refused_model,0.405994,,,,,,,,0,0,,,0,0,,3742.5,7755,200,stop,agent,2,search_manuals,0,0.01711,变频器报过流故障怎么处理？
+oos_adj_07,main,dev,oos_adjacent,,refuse,refused_model,0.449513,,,,,,,,0,0,,,0,0,,1622.8,2854,76,stop,agent,1,,0,0.006316,皮带输送机跑偏怎么调整？
+oos_adj_08,main,dev,oos_adjacent,,refuse,refused_model,0.40716,,,,,,,,0,0,,,0,0,,2131.0,2386,84,stop,agent,1,,0,0.005444,锅炉安全阀多久校验一次？
+oos_adj_09,main,dev,oos_adjacent,,refuse,refused_model,0.394191,,,,,,,,0,0,,,0,0,,1583.3,3007,119,stop,agent,1,,0,0.006966,冷却塔风机的减速器漏油怎么办？
+oos_adj_10,main,test,oos_adjacent,,refuse,refused_model,0.359954,,,,,,,,0,0,,,0,0,,2005.3,2897,118,stop,agent,1,,0,0.006738,数控机床主轴轴承的预紧力怎么调整？
+oos_adj_11,main,dev,oos_adjacent,,refuse,refused_model,0.451707,,,,,,,,0,0,,,0,0,,1869.8,2755,112,stop,agent,1,,0,0.006406,叉车液压油缸自动下沉是什么原因？
+oos_adj_12,main,dev,oos_adjacent,,refuse,refused_model,0.363311,,,,,,,,0,0,,,0,0,,9628.7,14982,306,stop,agent,3,search_manuals,0,0.032412,电动机的绝缘电阻低于多少就不能启动？
+oos_adj_13,main,test,oos_adjacent,,refuse,refused_model,0.429273,,,,,,,,0,0,,,0,0,,2112.4,2605,107,stop,agent,1,,0,0.006066,罗茨真空泵的极限真空度是多少？
+oos_adj_14,main,test,oos_adjacent,,refuse,refused_model,0.352231,,,,,,,,0,0,,,0,0,,1813.2,2759,91,stop,agent,1,,0,0.006246,隔膜计量泵的冲程怎么调节？
+oos_dom_01,main,dev,oos_in_domain,,refuse,refused_model,0.303246,,,,,,,,0,0,,,0,0,,4718.8,5391,128,stop,agent,2,read_section,0,0.011806,Model 3700 的保修期是多长时间？
+oos_dom_02,main,dev,oos_in_domain,,refuse,refused_model,0.232413,,,,,,,,0,0,,,0,0,,1559.7,2352,51,stop,agent,1,,0,0.005112,Wilo-WR 系列多级离心泵的价格大概是多少？
+oos_dom_03,main,test,oos_in_domain,,refuse,refused_model,0.312137,,,,,,,,0,0,,,0,0,,3644.8,6129,154,stop,agent,2,lookup_table、search_manuals,0,0.01349,D型多级离心泵的噪声限值是多少分贝？
+oos_dom_04,main,test,oos_in_domain,,refuse,refused_model,0.436962,,,,,,,,0,0,,,0,0,,5557.8,12685,335,stop,agent,3,lookup_table、search_manuals,0,0.02805,Leader Ecojet 120 的额定功率是多少瓦？
+oos_dom_05,main,dev,oos_in_domain,,refuse,answered,0.398029,,,,,,,,1,0,1,0,1,0,,3495.6,6143,186,stop,agent,2,lookup_table、search_manuals,0,0.013774,Wilo-WR 配用电机的绝缘等级是什么？
+oos_dom_06,main,test,oos_in_domain,,refuse,refused_model,0.268165,,,,,,,,0,0,,,0,0,,3369.2,8072,190,stop,agent,2,search_manuals,0,0.017664,D型多级离心泵的质保期是几年？
+oos_dom_07,main,dev,oos_in_domain,,refuse,refused_model,0.333019,,,,,,,,0,0,,,0,0,,1820.6,2773,71,stop,agent,1,,0,0.006114,Leader 离心泵的最大吸入深度是多少米？
+oos_dom_08,main,test,oos_in_domain,,refuse,refused_model,0.286701,,,,,,,,0,0,,,0,0,,5579.4,11020,344,stop,agent,3,lookup_table、search_manuals,0,0.024792,Model 3700 泵本体的重量是多少？
+oos_dom_09,main,dev,oos_in_domain,,refuse,answered,0.300276,,,,,,,,1,0,0,0,1,0,,7886.7,15801,335,stop,agent,3,lookup_table、search_manuals,0,0.034282,Wilo-WR 多级泵的额定转速是多少？
+oos_unr_01,main,dev,oos_unrelated,,refuse,refused_model,0.62704,,,,,,,,0,0,,,0,0,,2050.0,2731,87,stop,agent,1,,0,0.006158,今天上海的天气怎么样？
+oos_unr_02,main,dev,oos_unrelated,,refuse,refused_model,0.71816,,,,,,,,0,0,,,0,0,,2093.6,2671,64,stop,agent,1,,0,0.005854,帮我写一首关于春天的诗。
+oos_unr_03,main,test,oos_unrelated,,refuse,refused_model,0.49179,,,,,,,,0,0,,,0,0,,1690.5,2726,79,stop,agent,1,,0,0.006084,Python 里怎么读取 CSV 文件？
+oos_unr_04,main,dev,oos_unrelated,,refuse,refused_model,0.618197,,,,,,,,0,0,,,0,0,,1818.8,2476,63,stop,agent,1,,0,0.005456,个人所得税是怎么计算的？
+oos_unr_05,main,test,oos_unrelated,,refuse,refused_model,0.659115,,,,,,,,0,0,,,0,0,,1921.7,2582,65,stop,agent,1,,0,0.005684,推荐几部好看的科幻电影。
+oos_unr_06,main,test,oos_unrelated,,refuse,refused_model,0.629957,,,,,,,,0,0,,,0,0,,1561.3,2585,56,stop,agent,1,,0,0.005618,感冒了吃什么药好？

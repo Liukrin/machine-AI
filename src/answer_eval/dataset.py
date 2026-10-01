@@ -5,8 +5,10 @@
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
+import operator
 import re
 import sys
 from collections import Counter, defaultdict
@@ -21,18 +23,36 @@ sys.path.insert(0, str(ROOT / "src" / "s3_eval"))
 
 from textnorm import compile_pattern, loose, macro_numbers, norm, number_set  # noqa: E402
 
-TYPES_ANSWER = ["fact", "procedure", "table", "cross_chunk", "colloquial", "multi_turn"]
+TYPES_ANSWER = ["fact", "procedure", "table", "cross_chunk", "colloquial", "multi_turn",
+                # 以下题型只出现在 Agent 多步任务集（eval/agent_tasks.yaml）
+                "convert", "check", "table_lookup", "multi_step"]
 TYPES_REFUSE = ["oos_adjacent", "oos_in_domain", "oos_unrelated"]
 TYPE_CN = {
     "fact": "正文事实", "procedure": "操作步骤", "table": "表格查询", "cross_chunk": "跨片段",
     "colloquial": "口语化", "multi_turn": "多轮追问",
+    "convert": "单位换算", "check": "限值核对", "table_lookup": "表格精确查询", "multi_step": "多步/跨手册",
     "oos_adjacent": "相近领域（库外）", "oos_in_domain": "手册未写", "oos_unrelated": "无关问题",
 }
 SPLITS = ("dev", "test")
+# 评测集里 tools 字段可写的工具名（Agent 的工具，见 src/s4_agent/tools.py）
+KNOWN_TOOLS = ("search_manuals", "lookup_table", "read_section", "convert_unit", "check_value")
 
 
 def load_config() -> dict:
     return yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+
+
+def eval_set(acfg: dict, name: str) -> dict:
+    """评测集的路径配置。main 是 answer_eval 段顶层的 items / split；其余写在 answer_eval.sets 下，
+    结果放在评测目录的同名子目录里（主评测集直接放在评测目录下，与以前一致）。"""
+    if name == "main":
+        return {"name": "main", "items": acfg["items"], "split": acfg["split"], "subdir": "",
+                "title": "答案级评测集"}
+    sets = acfg.get("sets") or {}
+    if name not in sets:
+        raise SystemExit(f"config answer_eval.sets 里没有评测集「{name}」，可选：main、{'、'.join(sets)}")
+    s = sets[name]
+    return {"name": name, "items": s["items"], "split": s["split"], "subdir": name, "title": s.get("title") or name}
 
 
 # --------------------------------------------------------------------------- 语料
@@ -69,6 +89,14 @@ class Corpus:
             self._numbers[chunk_id] = number_set(self.text[chunk_id])
         return self._numbers[chunk_id]
 
+    def numbers_lenient(self, chunk_id: str) -> set[float]:
+        """宽松的数值集合：在 numbers() 之外，把 MinerU 拆开的小数（「2. 5m/s」）也按合并后的读法收进来。"""
+        key = "~" + chunk_id
+        if key not in self._numbers:
+            merged = re.sub(r"(?<=\d)\.\s+(?=\d)", ".", self.text[chunk_id])
+            self._numbers[key] = self.numbers(chunk_id) | number_set(merged)
+        return self._numbers[key]
+
     def loose(self, chunk_id: str) -> str:
         """只留汉字、字母、数字的片段文本（核对摘抄、算字面重合度用）。"""
         if chunk_id not in self._loose:
@@ -95,10 +123,61 @@ def load_items(path: Path) -> list[dict]:
     for it in items:
         it["docs"] = [str(d) for d in _as_list(it.get("doc"))]
         it.setdefault("history", [])
+        it["tools"] = [str(t) for t in _as_list(it.get("tools"))]
         for f in it.get("facts") or []:
             f["any"] = _as_list(f.get("any"))
             f["numeric"] = bool(f.get("numeric"))
+            f["calc"] = [str(x) for x in _as_list(f.get("calc"))]
     return items
+
+
+# --------------------------------------------------------------------------- 推算数值
+_CALC_OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+             ast.Div: operator.truediv, ast.Pow: operator.pow}
+
+
+def calc_value(expr: str) -> float:
+    """计算评测集里 calc 字段的算式（只允许数字与 + - * / ** 和括号）。"""
+    def ev(node):
+        if isinstance(node, ast.Expression):
+            return ev(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return float(node.value)
+        if isinstance(node, ast.BinOp) and type(node.op) in _CALC_OPS:
+            return _CALC_OPS[type(node.op)](ev(node.left), ev(node.right))
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+            return -ev(node.operand)
+        raise ValueError(f"算式里有不允许的内容：{ast.dump(node)[:60]}")
+    return ev(ast.parse(expr, mode="eval"))
+
+
+def _rounds_to(written: str, value: float) -> bool:
+    """written（如 3.33）是不是 value 按其小数位数四舍五入后的写法。"""
+    w = written.replace(",", "")
+    decimals = len(w.split(".")[1]) if "." in w else 0
+    return abs(float(w) - value) <= 0.5 * 10 ** -decimals + 1e-9
+
+
+def _check_calc(fact: dict) -> list[str]:
+    """推算数值事实（换算、差值）：模式里每个 {n:…} 都必须是某个 calc 算式结果的正确舍入。
+
+    这类数字不在手册原文里，没法做「数字出自证据」的检查，改为用独立写出的算式核对，
+    算式与 Agent 的换算工具互不依赖（换算系数在评测集里另写一遍）。
+    """
+    errs = []
+    try:
+        values = [calc_value(e) for e in fact["calc"]]
+    except (SyntaxError, ValueError, ZeroDivisionError) as exc:
+        return [f"calc 算式无法计算：{exc}"]
+    for pattern in fact["any"]:
+        for w in macro_numbers(pattern):
+            if "/" in w:
+                continue
+            if not any(_rounds_to(w, v) for v in values):
+                errs.append(f"{pattern} 里的 {w} 不是 calc 结果 {[round(v, 6) for v in values]} 的正确舍入")
+    if not any(macro_numbers(p) for p in fact["any"]):
+        errs.append("推算数值事实的模式里没有 {n:…} 宏")
+    return errs
 
 
 @lru_cache(maxsize=None)
@@ -206,6 +285,9 @@ def validate(items: list[dict], corpus: Corpus, split: dict[str, str]) -> tuple[
             err(f"type={typ} 与 expect={expect} 不匹配")
         if not (it.get("question") or "").strip():
             err("缺 question")
+        unknown_tools = [t for t in it["tools"] if t not in KNOWN_TOOLS]
+        if unknown_tools:
+            err(f"tools 里有未知的工具名：{unknown_tools}（可选 {', '.join(KNOWN_TOOLS)}）")
         if iid not in split:
             err("未划分 dev/test（运行 validate.py --assign）")
         elif split[iid] not in SPLITS:
@@ -272,7 +354,12 @@ def validate(items: list[dict], corpus: Corpus, split: dict[str, str]) -> tuple[
                 continue
             if not fact_matches(f, reference):
                 err(f"参考答案不满足自己的事实「{name}」：{f['any']}")
-            if f["numeric"] and evidence_ids:
+            if f["calc"]:
+                if not f["numeric"]:
+                    err(f"事实「{name}」写了 calc，应同时标 numeric: true")
+                for why in _check_calc(f):
+                    err(f"推算数值事实「{name}」：{why}")
+            elif f["numeric"] and evidence_ids:
                 ok, why = _grounded(f, evidence_ids, corpus)
                 if not ok:
                     err(f"数值事实「{name}」未落地：{why}")

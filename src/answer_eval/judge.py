@@ -115,12 +115,23 @@ class Judge:
 
     # ----------------------------------------------------------------------- 忠实度
     def faithfulness(self, ref: str, question: str, sentences: list[dict], retrieved: list[str],
-                     corpus: Corpus) -> dict:
-        """逐句判断是否有片段依据。返回 {declined, sentences:[{support, by, quote, quote_ok, cited_ok}]}。"""
-        context = "\n\n".join(f"[{cid}]\n{corpus.text[cid]}" for cid in retrieved)
+                     corpus: Corpus, calc: list[dict] | None = None) -> dict:
+        """逐句判断是否有片段依据。返回 {declined, sentences:[{support, by, quote, quote_ok, cited_ok}]}。
+
+        calc 是 Agent 换算、核对工具的输出（scoring 里整理的 {text, inputs, source}）：原文编号成 calc_1、calc_2…
+        和手册片段一起给评审，换算结果、核对结论以它为依据（这些数字手册原文里没有）。没有工具输出时，输入与以前完全相同。
+        """
+        calc = calc or []
+        sources = {cid: corpus.text[cid] for cid in retrieved}
+        calc_ids = [f"calc_{i}" for i in range(1, len(calc) + 1)]
+        sources.update(zip(calc_ids, (c["text"] for c in calc)))
+        calc_by_id = dict(zip(calc_ids, calc))
+        context = "\n\n".join(f"[{cid}]\n{text}" for cid, text in sources.items())
         # 用「【句 i】」编号：答案句子里常有「1. …；2. …」这样的内部序号，用「1.」编号会被当成多句
         numbered = "\n".join(f"【句 {i}】{s['text']}" for i, s in enumerate(sentences, 1))
-        user = (f"问题：{question}\n\n手册片段：\n{context}\n\n"
+        note = ("（编号以 calc_ 开头的是计算工具的输出：单位换算结果、实测值与手册限值的比较结论，由确定性代码算出，"
+                "可作为依据；手册限值本身仍须出自手册片段。）\n\n") if calc else ""
+        user = (f"问题：{question}\n\n手册片段：\n{context}\n\n{note}"
                 f"待核对的句子（共 {len(sentences)} 句，每个【句 i】是一句，引用标记已去掉）：\n{numbered}")
 
         def check(parsed: dict) -> dict:
@@ -146,13 +157,25 @@ class Judge:
         # 以下是确定性后处理：摘抄的原文是否真的在片段里；句子自己标的引用是否在支持片段之列
         out = []
         for s, r in zip(sentences, result["sentences"]):
-            by = [c for c in r["by"] if c in retrieved]
+            by = [c for c in r["by"] if c in sources]
             q = loose(r["quote"])
-            where = by or retrieved
-            quote_ok = bool(q) and any(q in self._loose(corpus, c) for c in where)
+            where = by or list(sources)
+            quote_ok = bool(q) and any(q in (self._loose(corpus, c) if c in corpus.text else loose(sources[c]))
+                                       for c in where)
             cited_ok = None
             if s["cited"] and r["support"] != "na":
-                cited_ok = r["support"] != "none" and any(c in by for c in s["cited"])
+                # 依据是换算/核对工具输出时，Agent 按要求标的是原始数值（或限值）所在的片段，评审往往只列 calc 编号：
+                # 由代码核对标的片段是不是核对的限值出处、或含有被换算的原始数值
+                ok_chunks = {c for c in by if c in corpus.text}
+                for cid in by:
+                    info = calc_by_id.get(cid)
+                    if not info:
+                        continue
+                    for c in s["cited"]:
+                        if c == info.get("source") or (c in corpus.text and any(
+                                v is not None and round(float(v), 6) in corpus.numbers_lenient(c) for v in info["inputs"])):
+                            ok_chunks.add(c)
+                cited_ok = r["support"] != "none" and any(c in ok_chunks for c in s["cited"])
             out.append({**r, "by": by, "quote_ok": quote_ok, "cited_ok": cited_ok})
         return {"declined": result["declined"], "sentences": out}
 

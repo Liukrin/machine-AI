@@ -10,9 +10,16 @@
     python src/answer_eval/run.py --reuse          # 只用缓存重算指标与报告，零 LLM 调用
     python src/answer_eval/run.py --ids d2_cross_01,mt_03   # 只评指定题目（调试用）
     python src/answer_eval/run.py --no-judge       # 跳过评审模型，只出确定性指标
+    python src/answer_eval/run.py --set tasks      # 换一个评测集（Agent 多步任务集，见 config answer_eval.sets）
+    python src/answer_eval/run.py --mode rag       # 被测系统的模式：agent（默认，config agent.default_mode）或 rag
 
 产物在 eval/answer_eval/<评测名>/：report.md、metrics.json、details.csv、scores.jsonl，
 以及可复算用的 answers.jsonl（系统原始输出）、judgments.jsonl（评审原始输出）、system.json。
+其他评测集的产物放在同名子目录里（如 eval/answer_eval/<评测名>/tasks/），system.json 共用。
+
+--reuse / --frozen 时用评测目录里记录的系统指纹（system.json），不按当前代码重算：系统输出只用缓存，
+不调用被测系统，所以流水线代码后来改过也能重出旧评测的报告。两者的区别是 --frozen 允许调用评审模型
+（比如给旧系统补评一个新评测集），--reuse 连评审也只用缓存。
 
 有系统调用出错或评审失败的题时，以非零码退出，报告里标明结果不完整。
 """
@@ -31,11 +38,20 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from dataset import (  # noqa: E402
-    ROOT, SPLITS, Corpus, load_config, load_items, load_split, resolve_evidence, validate,
+    ROOT, SPLITS, Corpus, eval_set, load_config, load_items, load_split, resolve_evidence, validate,
 )
 from report import build_report, write_csv, write_json  # noqa: E402
 from runner import run_system, system_info  # noqa: E402
 from scoring import score  # noqa: E402
+
+
+def cost_upper(s: dict, pricing: dict) -> float | None:
+    """单题成本上限（元）：输入全按未命中缓存计价。两种模式同一口径；被拒答闸拦下的题没有调用模型，记 0。"""
+    if s["behavior"] == "rejected_gate":
+        return 0.0
+    if s.get("input_tokens") is None:
+        return None
+    return (s["input_tokens"] * pricing["input_cache_miss"] + (s.get("output_tokens") or 0) * pricing["output"]) / 1e6
 
 
 def main() -> None:
@@ -45,18 +61,25 @@ def main() -> None:
     ap.add_argument("--ids", default="", help="只评这些题（逗号分隔）")
     ap.add_argument("--limit", type=int, default=0, help="只评前 N 题（冒烟用）")
     ap.add_argument("--reuse", action="store_true", help="系统输出与评审结果都只用缓存，缺了就报错")
+    ap.add_argument("--frozen", action="store_true",
+                    help="系统输出只用缓存（按 system.json 记录的指纹），评审模型照常调用")
     ap.add_argument("--force", action="store_true", help="忽略缓存，全部重新调用系统")
     ap.add_argument("--no-judge", action="store_true", help="跳过评审模型")
+    ap.add_argument("--set", default="main", help="评测集：main（默认）或 config answer_eval.sets 下的名字")
+    ap.add_argument("--mode", choices=["agent", "rag"], default=None,
+                    help="被测系统的模式；默认 config agent.default_mode。--reuse 时以 system.json 记录的为准")
     args = ap.parse_args()
-    if args.reuse and args.force:
-        raise SystemExit("--reuse 与 --force 互斥。")
+    if (args.reuse or args.frozen) and args.force:
+        raise SystemExit("--reuse / --frozen 与 --force 互斥。")
+    cached_only = args.reuse or args.frozen
 
     import selfcheck
     print(f"评分逻辑自检通过（{selfcheck.run()} 条）")
 
     cfg = load_config()
     acfg, scfg = cfg["answer_eval"], cfg["s4_halluc_ab"]
-    items_path, split_path = ROOT / acfg["items"], ROOT / acfg["split"]
+    es = eval_set(acfg, args.set)
+    items_path, split_path = ROOT / es["items"], ROOT / es["split"]
     items = load_items(items_path)
     corpus = Corpus.load(cfg)
     split = load_split(split_path)
@@ -83,24 +106,33 @@ def main() -> None:
 
     run_name = args.run or acfg["run"]
     run_dir = ROOT / acfg["out_dir"] / run_name
-    system = system_info(corpus.fingerprint())
+    set_dir = run_dir / es["subdir"] if es["subdir"] else run_dir
     sys_path = run_dir / "system.json"
-    if sys_path.exists() and not args.force:
-        old = json.loads(sys_path.read_text(encoding="utf-8"))
-        if old.get("system_id") != system["system_id"]:
-            diff = {k: (old.get(k), v) for k, v in system.items() if old.get(k) != v and k != "system_id"}
-            raise SystemExit(
-                f"评测「{run_name}」是用另一个系统版本跑的，差异（旧 → 新）：{diff}。\n"
-                "系统改了就换个 --run 名字另存一份，前后才能对比；确实要覆盖这次评测请加 --force。")
-    print(f"评测名 {run_name}；划分 {'、'.join(splits)}；题数 {len(selected)}；系统指纹 {system['system_id']}"
-          f"（提示词 {system['prompt_version']}，top_k={system['top_k']}，max_tokens={system['max_tokens']}）\n")
+    if cached_only and sys_path.exists():
+        # 只用缓存的系统输出：系统身份以当时记录的指纹为准（代码后来改过也不影响）
+        system = json.loads(sys_path.read_text(encoding="utf-8"))
+    else:
+        system = system_info(corpus.fingerprint(), args.mode or str(cfg["agent"]["default_mode"]))
+        if sys_path.exists() and not args.force:
+            old = json.loads(sys_path.read_text(encoding="utf-8"))
+            if old.get("system_id") != system["system_id"]:
+                diff = {k: (old.get(k), v) for k, v in system.items() if old.get(k) != v and k != "system_id"}
+                raise SystemExit(
+                    f"评测「{run_name}」是用另一个系统版本跑的，差异（旧 → 新）：{diff}。\n"
+                    "系统改了就换个 --run 名字另存一份，前后才能对比；只想用缓存重出报告请加 --reuse；"
+                    "确实要覆盖这次评测请加 --force。")
+    print(f"评测名 {run_name}；评测集 {es['name']}（{es['items']}）；划分 {'、'.join(splits)}；题数 {len(selected)}；"
+          f"系统指纹 {system['system_id']}（{system.get('mode', 'rag')} 模式，提示词 {system['prompt_version']}，"
+          f"top_k={system['top_k']}，max_tokens={system['max_tokens']}）\n")
 
     # 1. 系统输出（缓存）
-    answers = run_system(selected, run_dir / "answers.jsonl", system,
-                         reuse_only=args.reuse, force=args.force)
-    write_json(sys_path, system)
+    answers = run_system(selected, set_dir / "answers.jsonl", system,
+                         reuse_only=cached_only, force=args.force)
+    if not (cached_only and sys_path.exists()):
+        write_json(sys_path, system)
 
     # 2. 确定性评分
+    pricing = cfg["llm_pricing"]
     scores: list[dict] = []
     for it in selected:
         groups = resolve_evidence(it, corpus)
@@ -108,6 +140,7 @@ def main() -> None:
         for variant in variants:
             rec = answers[it["id"] if variant == "main" else f"{it['id']}@{variant}"]
             s = score(it, rec, groups, corpus, acfg, scfg)
+            s["cost_upper"] = cost_upper(s, pricing)
             s["_sents"] = [{"text": t, "cited": c} for t, c in zip(s["sentence_texts"], s["sentence_cited"])]
             s["_rec"], s["_item"] = rec, it
             scores.append(s)
@@ -117,7 +150,7 @@ def main() -> None:
     if not args.no_judge:
         from judge import Judge, run_jobs
 
-        judge = Judge(acfg["judge"], run_dir / "judgments.jsonl")
+        judge = Judge(acfg["judge"], set_dir / "judgments.jsonl")
         judge_model, judge_prompt = judge.model, judge.prompt_hash()
         if args.reuse:
             judge.reuse_only = True
@@ -128,7 +161,7 @@ def main() -> None:
             ref = f"{s['id']}@{s['variant']}"
             if s["_sents"]:
                 jobs.append(lambda s=s, ref=ref: judge.faithfulness(
-                    ref, s["_rec"]["question"], s["_sents"], s["retrieved"], corpus))
+                    ref, s["_rec"]["question"], s["_sents"], s["retrieved"], corpus, calc=s["calc_outputs"]))
                 targets.append((s, "judge"))
             if s["expect"] == "answer":
                 jobs.append(lambda s=s, ref=ref: judge.facts(ref, s["_item"], s["_rec"]["answer"]))
@@ -147,15 +180,17 @@ def main() -> None:
     # 4. 报告
     by_id = {it["id"]: it for it in items}
     meta = {"run": run_name, "generated_at": time.strftime("%Y-%m-%d %H:%M"), "system": system,
-            "items_path": acfg["items"], "n_items": len(items),
-            "judge_model": judge_model, "judge_prompt": judge_prompt}
+            "items_path": es["items"], "set": es["name"], "set_title": es["title"], "n_items": len(items),
+            "judge_model": judge_model, "judge_prompt": judge_prompt,
+            "pricing_note": f"输入未命中 {pricing['input_cache_miss']}、命中 {pricing['input_cache_hit']}、"
+                            f"输出 {pricing['output']} 元/百万 tokens"}
     L, metrics = build_report(scores, by_id, split, splits, meta)
     suffix = "_partial" if partial else ("" if args.split == "all" else f"_{args.split}")
-    report_path = run_dir / f"report{suffix}.md"
+    report_path = set_dir / f"report{suffix}.md"
     report_path.write_text("\n".join(L), encoding="utf-8")
-    write_json(run_dir / f"metrics{suffix}.json", {"meta": meta, "splits": metrics})
-    write_csv(scores, by_id, split, run_dir / f"details{suffix}.csv")
-    (run_dir / f"scores{suffix}.jsonl").write_text(
+    write_json(set_dir / f"metrics{suffix}.json", {"meta": meta, "splits": metrics})
+    write_csv(scores, by_id, split, set_dir / f"details{suffix}.csv")
+    (set_dir / f"scores{suffix}.jsonl").write_text(
         "\n".join(json.dumps(s, ensure_ascii=False) for s in scores) + "\n", encoding="utf-8")
 
     print("\n" + "=" * 78)

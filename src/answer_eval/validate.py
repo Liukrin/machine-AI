@@ -2,6 +2,7 @@
 
 用法：
     python src/answer_eval/validate.py            # 校验；有错误时以非零码退出
+    python src/answer_eval/validate.py --set tasks   # 校验 Agent 多步任务集（config answer_eval.sets）
     python src/answer_eval/validate.py --assign   # 给还没划分的题分配 dev/test 并写回划分文件
     python src/answer_eval/validate.py --show d2_cross_01   # 打印某道题解析出的证据片段
 """
@@ -19,7 +20,7 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from dataset import (  # noqa: E402
-    ROOT, Corpus, assign_split, distribution, load_config, load_items, load_split,
+    ROOT, Corpus, assign_split, distribution, eval_set, load_config, load_items, load_split,
     resolve_evidence, validate,
 )
 
@@ -28,14 +29,15 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="校验答案级评测集")
     ap.add_argument("--assign", action="store_true", help="给未划分的题分配 dev/test 并写回划分文件")
     ap.add_argument("--show", default="", help="打印某道题解析出的证据片段")
+    ap.add_argument("--set", default="main", help="评测集：main（默认）或 config answer_eval.sets 下的名字")
     args = ap.parse_args()
 
     import selfcheck
     print(f"评分逻辑自检通过（{selfcheck.run()} 条）")
 
     cfg = load_config()
-    acfg = cfg["answer_eval"]
-    items_path, split_path = ROOT / acfg["items"], ROOT / acfg["split"]
+    es = eval_set(cfg["answer_eval"], args.set)
+    items_path, split_path = ROOT / es["items"], ROOT / es["split"]
     items = load_items(items_path)
     corpus = Corpus.load(cfg)
     split = load_split(split_path)

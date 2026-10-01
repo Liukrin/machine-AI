@@ -1,0 +1,32 @@
+﻿题目ID,变体,划分,题型,手册,期望,行为,闸距离,证据命中,证据组数,事实答出,事实总数,数值答出,数值总数,完全答对,实质句数,无引用句数,评审有依据句数,评审无依据句数,答案数字数,找不到出处的数字数,引用样例手册,耗时ms,输入token,输出token,结束原因,模式,模型调用次数,用到的工具,工具报错次数,成本元(未命中计),问题
+cv_01,main,dev,convert,2,answer,answered,0.21418,1,1,2,2,2,2,是,2,0,2,0,11,3,,4949.4,861,75,stop,rag,,,0,0.002322,Wilo-WR 泵出水管路名义直径为 150 时，轴封水量是多少？折合每分钟多少升？
+cv_02,main,test,convert,2,answer,refused_model,0.295413,1,1,0,3,0,3,否,0,0,,,0,0,,1462.5,1030,4,stop,rag,,,0,0.002092,Wilo-WR 泵 GGG 壳体的最大承压是多少？换算成 MPa 和 psi 分别是多少？
+cv_03,main,test,convert,1,answer,answered,0.272266,1,1,1,2,1,2,否,2,1,2,0,1,0,,1779.8,1107,40,stop,rag,,,0,0.002534,D 型泵运转时，水泵轴承最高温度不应超过多少？用华氏度表示是多少？
+cv_04,main,test,convert,4,answer,answered,0.341913,1,1,1,2,1,2,否,2,1,2,0,4,1,,2007.0,984,47,stop,rag,,,0,0.002344,Model 3700 的冷却水压力最高不能超过多少？换算成 MPa 大约是多少？
+cv_05,main,dev,convert,4,answer,rejected_gate,0.382276,1,1,0,2,0,2,否,0,0,,,0,0,,70.1,,,,rag,,,0,0.0,Model 3700 采用外部冲洗时，冲洗液的注入速率要求是多少？换算成 m³/h 是多少？
+cv_06,main,dev,convert,1,answer,answered,0.275246,1,1,2,2,2,2,是,2,0,1,1,8,0,,2473.7,960,89,stop,rag,,,0,0.002632,D 型泵改为外冲洗结构时，冲洗水压力至少要比泵进口压力高多少？折合多少 kgf/cm²？
+cv_07,main,dev,convert,2,answer,answered,0.329959,1,1,1,2,1,2,否,2,1,1,0,1,1,,3076.9,1015,49,stop,rag,,,0,0.002422,Wilo-WR 出水管路的最大流速是多少？换算成英尺每秒是多少？
+cv_08,main,test,convert,4,answer,answered,0.251893,1,1,1,2,1,2,否,2,0,2,0,6,0,,2773.0,2500,73,stop,rag,,,0,0.005584,Model 3700 泵壳螺栓（项目 356A）规格为 5/8 英寸 UNC 时，拧紧扭矩是多少？折合多少 kgf·m？
+ck_01,main,dev,check,1,answer,refused_model,0.297298,1,1,0,2,0,1,否,0,0,,,0,0,,1940.3,748,35,stop,rag,,,0,0.001776,D 型泵运行中测得轴承温度 78℃，是否超过手册规定？
+ck_02,main,test,check,1,answer,answered,0.319743,1,1,2,2,1,1,是,2,0,2,0,4,0,,3789.3,697,75,stop,rag,,,0,0.001994,MD 型泵用来输送固体颗粒体积浓度为 2% 的矿井水，符合手册要求吗？
+ck_03,main,dev,check,2,answer,answered,0.299459,1,1,2,2,1,1,是,1,0,1,0,3,0,,2163.1,752,37,stop,rag,,,0,0.0018,Wilo-WR 泵用百分表对中，测得径向跳动 0.08mm，合格吗？
+ck_04,main,dev,check,2,answer,refused_model,0.330486,1,1,0,2,0,1,否,0,0,,,0,0,,1570.7,654,4,stop,rag,,,0,0.00134,GG 壳体的 Wilo-WR 泵，用在工作压力 2.8 MPa 的系统里可以吗？
+ck_05,main,test,check,4,answer,answered,0.305262,1,1,2,2,1,1,是,2,0,2,0,8,0,,2924.5,870,86,stop,rag,,,0,0.002428,Model 3700 运行中测得轴承温度 190°F，在手册给出的正常范围内吗？
+ck_06,main,dev,check,4,answer,answered,0.321438,1,1,3,3,2,2,是,2,0,1,0,12,1,,2236.4,716,91,stop,rag,,,0,0.00216,Model 3700 采用外部冲洗时，冲洗液压力比密封腔压力高 0.5 bar，满足手册要求吗？
+ck_07,main,test,check,4,answer,answered,0.244668,1,1,2,2,1,1,是,1,0,1,0,2,0,,3227.7,1307,44,stop,rag,,,0,0.002966,Model 3700 最终校准时，工作温度下千分表的总读数（T.I.R.）测得 0.003 英寸，校准合格吗？
+ck_08,main,test,check,2,answer,rejected_gate,0.382147,1,1,0,2,0,1,否,0,0,,,0,0,,60.5,,,,rag,,,0,0.0,Wilo-WR 爪型联轴器外径 200mm，测得两个半联轴节端面间距为 7mm，符合要求吗？
+tb_01,main,test,table_lookup,4,answer,rejected_gate,0.395601,0,1,0,1,0,1,否,0,0,,,0,0,,30.7,,,,rag,,,0,0.0,Model 3700 的零件编号 184 是什么零件？
+tb_02,main,dev,table_lookup,4,answer,answered,0.282446,1,1,1,1,1,1,是,2,1,2,0,5,0,,3975.8,739,42,stop,rag,,,0,0.001814,Model 3700 的泵轴对应的零件编号是多少？
+tb_03,main,dev,table_lookup,2,answer,answered,0.336223,2,2,2,2,2,2,是,1,0,1,0,2,0,,1687.3,1765,39,stop,rag,,,0,0.003842,Wilo-WR 零件清单中，叶轮和轴的零件号分别是多少？
+tb_04,main,test,table_lookup,4,answer,answered,0.289266,0,1,0,5,0,0,否,2,1,1,0,1,0,,2922.1,764,119,stop,rag,,,0,0.00248,按 Model 3700 的运行故障排除表，机械密封严重泄漏可能有哪些原因？
+tb_05,main,dev,table_lookup,4,answer,refused_model,0.313665,0,1,0,5,0,0,否,0,0,,,0,0,,1526.4,587,4,stop,rag,,,0,0.001206,Model 3700 运行时电机所需电力过大，故障排除表列出了哪些原因？
+tb_06,main,dev,table_lookup,3,answer,answered,0.225863,1,1,4,4,0,0,是,1,0,1,0,5,0,,3775.7,1366,92,stop,rag,,,0,0.003468,Leader Ecoplus 泵过热保护开启、因过热停止，可能有哪些原因？
+tb_07,main,test,table_lookup,2,answer,answered,0.248686,1,1,3,3,3,3,是,1,0,1,0,4,0,,1776.5,944,39,stop,rag,,,0,0.0022,Wilo-WR 管径 125mm 时，水泵允许承受的力 Fx、Fy、Fz 分别是多少 daN？
+ms_01,main,dev,multi_step,1+4,answer,answered,0.274958,1,2,1,3,1,2,否,3,0,1,0,7,0,,2225.6,1002,148,stop,rag,,,0,0.003188,D 型泵和 Model 3700 对轴承温度的上限分别是多少？哪一个允许的轴承温度更高？
+ms_02,main,test,multi_step,2+4,answer,answered,0.31853,2,2,2,2,2,2,是,2,0,2,0,7,0,,1775.4,895,72,stop,rag,,,0,0.002366,Wilo-WR 和 Model 3700 对密封冲洗水（冲洗液）压力的要求分别是什么？
+ms_03,main,dev,multi_step,4,answer,answered,0.346767,1,1,3,3,2,2,是,4,1,3,0,18,3,,1988.8,965,149,stop,rag,,,0,0.003122,Model 3700 运行中测得轴承温度 85℃，换算成华氏度是多少？是否超出手册给出的正常范围？
+ms_04,main,dev,multi_step,1+2,answer,answered,0.271604,2,2,3,3,3,3,是,2,0,2,0,3,0,,1703.9,1065,50,stop,rag,,,0,0.00253,D 型泵长期停泵和 Wilo-WR 泵储存期间，分别多久盘一次车（转动转子）？
+ms_05,main,test,multi_step,1+2,answer,answered,0.224802,1,2,1,3,1,2,否,3,1,3,0,2,0,,1819.7,950,82,stop,rag,,,0,0.002556,Wilo-WR 用百分表对中时的径向最大跳动，和 D 型泵两联轴器外圆上的不同心度允差，各是多少？哪个要求更严？
+rf_01,main,test,oos_in_domain,,refuse,refused_model,0.263597,,,,,,,,0,0,,,0,0,,1377.8,943,4,stop,rag,,,0,0.001918,Wilo-WR 泵运行时测得振动速度 4.5 mm/s，是否超出手册允许值？
+rf_02,main,dev,oos_in_domain,,refuse,answered,0.249941,,,,,,,,3,1,2,0,4,0,,1552.5,904,71,stop,rag,,,0,0.002376,D 型泵如果用的是机械密封，正常运行时允许泄漏量是多少？
+rf_03,main,dev,oos_in_domain,,refuse,refused_model,0.332495,,,,,,,,0,0,,,0,0,,2126.6,666,4,stop,rag,,,0,0.001364,Leader Ecojet 泵的最大工作压力是多少 bar？换算成 MPa 是多少？

@@ -110,6 +110,31 @@ def run() -> int:
           "核对摘抄时忽略标点与项目符号")
     check(loose("允差0.5毫米") not in loose("不同心度允差0.1毫米"), "改了数字的摘抄对不上")
 
+    # ---- Agent 多步任务集：推算数值的舍入核对、限值核对题的结论用语
+    from dataset import ROOT, _rounds_to, calc_value, fact_matches, load_items
+
+    check(abs(calc_value("0.2*1000/60") - 10 / 3) < 1e-9 and calc_value("75*9/5+32") == 167.0
+          and calc_value("-(2**3)") == -8.0, "calc 算式")
+    check(_rounds_to("3.33", 10 / 3) and _rounds_to("3.3", 10 / 3) and _rounds_to("3.333", 10 / 3)
+          and not _rounds_to("3.34", 10 / 3) and not _rounds_to("3.32", 10 / 3), "舍入核对：3.33 是 10/3 的正确舍入，3.34 不是")
+    check(_rounds_to("580", 580.151) and _rounds_to("0.69", 0.68647) and not _rounds_to("0.68", 0.68647),
+          "舍入核对：整数与两位小数")
+
+    tasks = {it["id"]: it for it in load_items(ROOT / "eval" / "agent_tasks.yaml")}
+    exceed = tasks["ck_01"]["facts"][1]    # 结论：超过（&exceed）
+    within = tasks["ck_03"]["facts"][1]    # 结论：合格（&within）
+
+    def says(fact: dict, answer: str) -> bool:
+        return fact_matches(fact, norm(answer))
+
+    for text in ("78℃ 已超过手册规定的 75℃。", "超出了上限 180°F。", "不符合要求。", "190°F 不在正常范围内。",
+                 "不可以，2.8 MPa 超过了最大承压。", "0.003 英寸，不合格。"):
+        check(says(exceed, text) and not says(within, text), f"结论「超出」：{text}")
+    for text in ("合格。0.08mm 在允许范围内。", "符合要求。", "未超过手册规定的上限。", "满足。0.5 bar 在要求范围之内。"):
+        check(says(within, text) and not says(exceed, text), f"结论「合格」：{text}")
+    check(not says(exceed, "轴承最高温度不应超过75℃，实测70℃。") and not says(within, "测得的跳动是否合格要看手册"),
+          "复述限值「不应超过」不算超出，「是否合格」不算合格")
+
     if bad:
         raise RuntimeError(f"评分逻辑自检失败 {len(bad)}/{n} 条：" + "；".join(bad))
     return n

@@ -15,8 +15,9 @@ docs/resume_bullets.md
 # 307KB 检索缓存，本地可重建（--rebuild-cache），不入库
 eval/halluc_ab/retrieval_cache.jsonl
 # 答案级评测：可由缓存零调用重建的中间产物（run.py --reuse / probe.py），以及只评部分题目时的临时产物
-eval/answer_eval/*/scores*.jsonl
-eval/answer_eval/*/judge_probe.json
-eval/answer_eval/*/*_dev.*
-eval/answer_eval/*/*_test.*
-eval/answer_eval/*/*_partial.*
+# （** 覆盖评测目录下的子评测集，如 eval/answer_eval/<评测名>/tasks/，以及只比了一个划分的 compare_*_dev.md）
+eval/answer_eval/**/scores*.jsonl
+eval/answer_eval/**/judge_probe.json
+eval/answer_eval/**/*_dev.*
+eval/answer_eval/**/*_test.*
+eval/answer_eval/**/*_partial.*

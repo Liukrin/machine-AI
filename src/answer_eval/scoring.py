@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 
-from dataset import Corpus, fact_matches
+from dataset import Corpus, _rounds_to, fact_matches
 from textnorm import CHUNK_ID_RE, attach_trailing_citations, loose, norm, numbers_in, strip_citations
 
 _SENT_SPLIT_RE = re.compile(r"[。！？\n]")      # 与 verify.verify_citation 的切句口径一致
@@ -101,20 +101,55 @@ def score(item: dict, record: dict, groups: list[list[str]], corpus: Corpus,
         "input_tokens": record.get("input_tokens"), "output_tokens": record.get("output_tokens"),
     }
 
-    # 数值溯源：答案里的每个数，是否出现在本次检索到的片段（或问句）里
+    # Agent 的工具调用（rag 模式和旧缓存没有 steps）
+    steps = record.get("steps") or []
+    # 换算、核对工具的输出：原文（给评审、做数值溯源）+ 输入数值与限值出处（核对引用是否标对了片段）
+    calc_outputs = []
+    for st in steps:
+        if not (st.get("ok") and st.get("name") in ("convert_unit", "check_value") and st.get("output")):
+            continue
+        a = st.get("args") or {}
+        if st["name"] == "convert_unit":
+            calc_outputs.append({"text": st["output"], "inputs": [a.get("value")], "source": None})
+        else:
+            calc_outputs.append({"text": st["output"], "source": a.get("source_chunk_id"),
+                                 "inputs": [x for x in (a.get("limit_min"), a.get("limit_max")) if x is not None]})
+    used = {st["name"] for st in steps}
+    s.update({
+        "mode": record.get("mode") or "rag",
+        "llm_calls": record.get("llm_calls"),
+        "tool_calls": sum(1 for st in steps if not st.get("auto")),      # 不含系统自动做的预检索
+        "tools_used": sorted({st["name"] for st in steps if not st.get("auto")}),
+        "tool_errors": sum(1 for st in steps if not st.get("ok")),
+        "forced_final": bool(record.get("forced_final")),
+        "cost_yuan": record.get("cost_yuan"),
+        "cache_read_tokens": record.get("cache_read_tokens"),
+        "calc_outputs": calc_outputs,
+        "tools_expected": item.get("tools") or [],
+        "tools_expected_ok": all(t in used for t in item.get("tools") or []),
+    })
+
+    # 数值溯源：答案里的每个数，是否出现在本次检索到的片段、问句或换算/核对工具的输出里
     if answer:
         allowed: set[float] = {round(x, 6) for x in numbers_in(record["question"])}
+        # 工具输出里的数（含精确值）；答案常把精确值再舍入一位（3.333 → 3.33），带小数的数按「是某个精确值的正确舍入」算可溯源
+        calc_numbers = {round(x, 6) for c in calc_outputs for x in numbers_in(c["text"])}
+        allowed |= calc_numbers
         cited_allowed = set(allowed)
         for cid in retrieved:
             allowed |= corpus.numbers(cid)
         for cid in cited:
             if cid in corpus.chunks:
                 cited_allowed |= corpus.numbers(cid)
+
+        def traced(x: float, pool: set[float]) -> bool:
+            return x in pool or (x != int(x) and any(_rounds_to(repr(x), v) for v in calc_numbers))
+
         nums = [round(x, 6) for x in numbers_in(answer, answer=True)]
         s["n_numbers"] = len(nums)
-        s["untraced_numbers"] = sorted({x for x in nums if x not in allowed})
-        s["n_untraced"] = sum(1 for x in nums if x not in allowed)
-        s["n_untraced_in_cited"] = sum(1 for x in nums if x not in cited_allowed)
+        s["untraced_numbers"] = sorted({x for x in nums if not traced(x, allowed)})
+        s["n_untraced"] = sum(1 for x in nums if not traced(x, allowed))
+        s["n_untraced_in_cited"] = sum(1 for x in nums if not traced(x, cited_allowed))
     else:
         s.update(n_numbers=0, untraced_numbers=[], n_untraced=0, n_untraced_in_cited=0)
 

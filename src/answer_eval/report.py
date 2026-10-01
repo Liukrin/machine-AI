@@ -158,6 +158,40 @@ def aggregate(rows: list[dict]) -> dict:
     m["tokens"] = {"input_mean": sum(tin) / len(tin) if tin else None,
                    "output_mean": sum(tout) / len(tout) if tout else None,
                    "input_sum": sum(tin), "output_sum": sum(tout)}
+    # 成本：所有调用了模型的题（作答 + 模型自述拒答）；被拒答闸拦下的题没有调用模型，记 0 元
+    upper = [r["cost_upper"] for r in ok if r.get("cost_upper") is not None]
+    actual = [r["cost_yuan"] for r in ok if r.get("cost_yuan") is not None]
+    m["cost"] = {"upper_mean": sum(upper) / len(upper) if upper else None, "n_upper": len(upper),
+                 "actual_mean": sum(actual) / len(actual) if actual else None, "n_actual": len(actual)}
+
+    # ---- 按题型（应作答的题），供 compare.py 并排对比
+    m["by_type"] = {}
+    for typ in TYPES_ANSWER:
+        sub = [r for r in ans_items if r["type"] == typ]
+        if sub:
+            m["by_type"][typ] = {"n": len(sub), "strict_correct": sum(r["all_facts"] for r in sub),
+                                 "false_refusal": sum(r["refused"] for r in sub),
+                                 "evidence_all": sum(r["evidence_all"] for r in sub)}
+
+    # ---- Agent 行为（rag 模式没有这些字段）
+    agent_rows = [r for r in ok if r.get("mode") == "agent" and r.get("llm_calls") is not None]
+    if agent_rows:
+        calls = Counter(r["llm_calls"] for r in agent_rows)
+        expected = [r for r in agent_rows if r["expect"] == "answer" and r.get("tools_expected")]
+        m["agent"] = {
+            "n": len(agent_rows),
+            "llm_calls_mean": sum(r["llm_calls"] for r in agent_rows) / len(agent_rows),
+            "llm_calls_dist": {k: calls[k] for k in sorted(calls)},
+            "presearch_only": sum(r["llm_calls"] == 1 for r in agent_rows),
+            "tool_calls_mean": sum(r["tool_calls"] for r in agent_rows) / len(agent_rows),
+            "tool_usage": dict(Counter(t for r in agent_rows for t in r["tools_used"])),
+            "tool_errors": sum(r["tool_errors"] for r in agent_rows),
+            "tool_errors_items": sum(r["tool_errors"] > 0 for r in agent_rows),
+            "forced_final": sum(r["forced_final"] for r in agent_rows),
+            "tools_expected_ok": (sum(r["tools_expected_ok"] for r in expected), len(expected)),
+            "cache_read_share": (sum(r.get("cache_read_tokens") or 0 for r in agent_rows),
+                                 sum(r.get("input_tokens") or 0 for r in agent_rows)),
+        }
     return m
 
 
@@ -187,11 +221,21 @@ def build_report(scores: list[dict], items: dict[str, dict], split: dict[str, st
     aggs = {sp: aggregate(by_split[sp]) for sp in splits}
     sysinfo = meta["system"]
 
-    L = [f"# 答案级评测报告（{meta['run']}）", ""]
+    mode = sysinfo.get("mode", "rag")
+    title = meta.get("set_title") or "答案级评测集"
+    L = [f"# {title}评测报告（{meta['run']}，{mode} 模式）", ""]
     L.append(f"> 生成脚本：src/answer_eval/run.py；生成时间 {meta['generated_at']}")
-    L.append(f"> 被测系统：{sysinfo['model']}，提示词 {sysinfo['prompt_version']} 组，top_k={sysinfo['top_k']}，"
-             f"max_tokens={sysinfo['max_tokens']}，τ={sysinfo['tau_distance']}，temperature={sysinfo['temperature']}；"
-             f"系统指纹 {sysinfo['system_id']}（语料 {sysinfo['corpus']}，流水线源码 {sysinfo['code_sha1']}）")
+    if mode == "agent":
+        L.append(f"> 被测系统：工具调用 Agent（src/s4_agent/agent.py），{sysinfo['model']}，提示词 {sysinfo['prompt_version']}，"
+                 f"每次检索 {sysinfo['top_k']} 个片段，工具轮数上限 {sysinfo['max_tool_rounds']}（每题最多 "
+                 f"{sysinfo['max_tool_rounds'] + 1} 次模型调用），单次生成上限 {sysinfo['max_tokens']}，"
+                 f"相关度提示阈值 τ={sysinfo['tau_distance']}（不拦截），temperature={sysinfo['temperature']}；"
+                 f"系统指纹 {sysinfo['system_id']}（语料 {sysinfo['corpus']}，流水线源码 {sysinfo['code_sha1']}）")
+    else:
+        L.append(f"> 被测系统：固定流水线（rag 模式），{sysinfo['model']}，提示词 {sysinfo['prompt_version']} 组，"
+                 f"top_k={sysinfo['top_k']}，max_tokens={sysinfo['max_tokens']}，τ={sysinfo['tau_distance']}，"
+                 f"temperature={sysinfo['temperature']}；"
+                 f"系统指纹 {sysinfo['system_id']}（语料 {sysinfo['corpus']}，流水线源码 {sysinfo['code_sha1']}）")
     L.append(f"> 评测集：{meta['items_path']}，共 {meta['n_items']} 题；本报告覆盖 "
              + "、".join(f"{sp} {len(by_split[sp])} 题" for sp in splits)
              + "。dev 用于调试评测脚本和后续迭代，test 只用来报数。")
@@ -243,7 +287,17 @@ def build_report(scores: list[dict], items: dict[str, dict], split: dict[str, st
     row("首 token P50（ms）", lambda m: ms(m["latency"]["ttft_p50"]), "计时")
     row("单题 token 均值（输入 / 输出）", lambda m: "—" if m["tokens"]["input_mean"] is None else
         f"{m['tokens']['input_mean']:.0f} / {m['tokens']['output_mean']:.0f}", "接口返回")
+    row("单题成本均值（元，输入全按未命中缓存计）", lambda m: "—" if m["cost"]["upper_mean"] is None else
+        f"{m['cost']['upper_mean']:.5f}", "token × 单价")
+    if any(aggs[sp]["cost"]["actual_mean"] is not None for sp in splits):
+        row("单题成本均值（元，按接口返回的缓存命中）", lambda m: "—" if m["cost"]["actual_mean"] is None else
+            f"{m['cost']['actual_mean']:.5f}", "token × 单价")
     L.append("")
+    L.append("> Agent 的换算、核对结果以工具输出为依据（评审看到的 calc_ 编号）：这类句子「引用成立」的条件是"
+             "所标片段为核对的限值出处，或含有被换算的原始数值（代码核对）；数字溯源也把工具输出算作出处，"
+             "带小数的数是工具精确值的正确舍入也算。")
+    L.append(f"> 成本按 config llm_pricing 的高峰时段单价估算（{meta.get('pricing_note', '')}），作答和模型自述拒答的题都计入，"
+             "被拒答闸拦下的题没有调用模型、记 0 元；耗时与 token 只统计实际作答的题。")
     L.append("> 「关键事实召回」把被误拒的题记为一条都没答出；只看实际作答的题，召回为 "
              + "、".join(f"{sp} {frac(*aggs[sp]['fact_recall_answered'])}" for sp in splits) + "。")
     L.append("> 「误拒」只统计拒答闸拦截和不带引用的拒答话术。另有一些回答带着引用说明「片段里没有这项内容」，"
@@ -286,7 +340,8 @@ def build_report(scores: list[dict], items: dict[str, dict], split: dict[str, st
                 L.append(f"- `{r['id']}` {items[r['id']]['question']}（闸距离 {r['gate_distance']}；{tag}；"
                          f"引用 {r['cited'] or '无'}）")
             L.append("")
-    L.append("拒答闸的区分度（向量 top-1 距离，τ 以上被拦）：\n")
+    L.append("拒答闸的区分度（向量 top-1 距离，τ 以上被拦）：\n" if mode != "agent" else
+             "原问题的向量 top-1 距离分布（agent 模式不按它拦截，只在检索结果里提示相关度低，此处供对照）：\n")
     L += ["| 划分 | 题目 | 题数 | 最小 | 中位 | 最大 | 低于 τ 的题数 |", "|---|---|---|---|---|---|---|"]
     tau = sysinfo["tau_distance"]
     for sp in splits:
@@ -301,12 +356,15 @@ def build_report(scores: list[dict], items: dict[str, dict], split: dict[str, st
     # ---- 4. 多轮
     mt = [s for s in scores if s["type"] == "multi_turn" and s["behavior"] != "error"]
     if mt:
-        L += ["## 4. 多轮追问：只发最后一句 vs 改写成独立问题", "",
-              "线上目前只把最后一句发给系统（main）；standalone 是把同一道题人工改写成不依赖前文的问句再问一次，"
-              "相当于「系统会做追问改写」时的参考上限。", "",
+        main_name = "带前文历史" if mode == "agent" else "只发最后一句"
+        intro = ("agent 模式把前文（history）连同追问一起发给系统（main），由模型结合上文改写后检索；"
+                 if mode == "agent" else "rag 模式不看对话历史，只把最后一句发给系统（main）；")
+        L += [f"## 4. 多轮追问：{main_name} vs 改写成独立问题", "",
+              intro + "standalone 是把同一道题人工改写成不依赖前文的问句再问一次，"
+              "相当于「追问被完美改写」时的参考上限。", "",
               "| 划分 | 问法 | 题数 | 证据全部召回 | 误拒 | 关键事实召回 | 完全答对 |", "|---|---|---|---|---|---|---|"]
         for sp in splits:
-            for variant, name in (("main", "只发最后一句"), ("standalone", "改写成独立问题")):
+            for variant, name in (("main", main_name), ("standalone", "改写成独立问题")):
                 sub = [s for s in mt if s["variant"] == variant and split[s["id"]] == sp]
                 if sub:
                     L.append(f"| {sp} | {name} | {len(sub)} | {frac(sum(r['evidence_all'] for r in sub), len(sub))} "
@@ -314,6 +372,32 @@ def build_report(scores: list[dict], items: dict[str, dict], split: dict[str, st
                              f"| {frac(sum(r['n_facts_matched'] for r in sub), sum(r['n_facts'] for r in sub))} "
                              f"| {frac(sum(r['all_facts'] for r in sub), len(sub))} |")
         L.append("")
+
+    # ---- Agent 行为
+    if any("agent" in aggs[sp] for sp in splits):
+        L += ["## Agent 行为（工具调用）", "",
+              "每题先由系统用原问题检索一次（预检索，不算模型的工具调用）；之后模型可以再调工具，"
+              f"最多 {sysinfo.get('max_tool_rounds')} 轮，到上限后强制作答。", "",
+              "| 划分 | 题数 | 模型调用次数均值 | 分布（1/2/3/4 次） | 只看预检索就作答 | 工具调用均值（不含预检索） "
+              "| 有工具报错的题 | 达到轮数上限 | 输入 token 中缓存命中占比 | 期望的工具都用到了 |",
+              "|---|---|---|---|---|---|---|---|---|---|"]
+        for sp in splits:
+            a = aggs[sp].get("agent")
+            if not a:
+                continue
+            dist = " / ".join(str(a["llm_calls_dist"].get(k, 0)) for k in range(1, 5))
+            L.append(f"| {sp} | {a['n']} | {a['llm_calls_mean']:.2f} | {dist} | {frac(a['presearch_only'], a['n'])} "
+                     f"| {a['tool_calls_mean']:.2f} | {a['tool_errors_items']}（共 {a['tool_errors']} 次） "
+                     f"| {a['forced_final']} | {frac(*a['cache_read_share'])} | {frac(*a['tools_expected_ok'])} |")
+        tools_all = sorted({t for sp in splits for t in (aggs[sp].get("agent") or {}).get("tool_usage", {})})
+        if tools_all:
+            L += ["", "| 工具 | " + " | ".join(f"{sp} 用到的题数" for sp in splits) + " |",
+                  "|---|" + "---|" * len(splits)]
+            for t in tools_all:
+                L.append(f"| {t} | " + " | ".join(str((aggs[sp].get("agent") or {}).get("tool_usage", {}).get(t, 0))
+                                                  for sp in splits) + " |")
+        L += ["", "> 「期望的工具都用到了」只统计评测集里标了 tools 的题，只作参考、不计入对错："
+              "答对的方式不止一种（比如查到的片段里已经同时写了两种单位，就不必再换算）。", ""]
 
     # ---- 5. 评审自身的可靠性
     L += ["## 5. 评审模型的可靠性线索", "",
@@ -411,7 +495,8 @@ def write_csv(scores: list[dict], items: dict[str, dict], split: dict[str, str],
     headers = ["题目ID", "变体", "划分", "题型", "手册", "期望", "行为", "闸距离", "证据命中", "证据组数",
                "事实答出", "事实总数", "数值答出", "数值总数", "完全答对", "实质句数", "无引用句数",
                "评审有依据句数", "评审无依据句数", "答案数字数", "找不到出处的数字数", "引用样例手册",
-               "耗时ms", "输入token", "输出token", "结束原因", "问题"]
+               "耗时ms", "输入token", "输出token", "结束原因", "模式", "模型调用次数", "用到的工具", "工具报错次数",
+               "成本元(未命中计)", "问题"]
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
@@ -430,6 +515,9 @@ def write_csv(scores: list[dict], items: dict[str, dict], split: dict[str, str],
                 s["n_sentences"], s["n_uncited"], sup["full"] if j else "", sup["none"] if j else "",
                 s["n_numbers"], s["n_untraced"], "是" if s["cited_sample"] else "",
                 s.get("t_total_ms"), s.get("input_tokens"), s.get("output_tokens"), s.get("finish_reason") or "",
+                s.get("mode") or "", s.get("llm_calls") if s.get("llm_calls") is not None else "",
+                "、".join(s.get("tools_used") or []), s.get("tool_errors") or 0,
+                "" if s.get("cost_upper") is None else round(s["cost_upper"], 6),
                 items[s["id"]]["question"] if s["variant"] == "main" else items[s["id"]].get("standalone", ""),
             ])
 
