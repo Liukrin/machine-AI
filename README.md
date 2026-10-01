@@ -159,10 +159,11 @@ dev 上的结果方向一致（主集 49/62 → 62/62，任务集 9/15 → 15/15
 - **代价**：输入 token 约 3.5–5.6 倍、成本约 4.5–6.4 倍；多步任务平均 1.9 次模型调用，慢约 1.8 秒。
 
 ```bash
-python src/answer_eval/run.py --run agent_v1                 # 主评测集（默认 agent 模式）；--split dev 只看开发集
-python src/answer_eval/run.py --run agent_v1 --set tasks     # Agent 多步任务集
-python src/answer_eval/run.py --run baseline --reuse         # rag 基线：用缓存零调用重算
-python src/answer_eval/compare.py baseline agent_v1          # 两次评测并排对比
+python src/answer_eval/run.py --run agent_v1 --reuse              # 主评测集（agent 模式）：用缓存零调用重算
+python src/answer_eval/run.py --run agent_v1 --set tasks --reuse  # Agent 多步任务集
+python src/answer_eval/run.py --run baseline --reuse              # rag 基线
+python src/answer_eval/compare.py baseline agent_v1               # 两次评测并排对比
+python src/answer_eval/run.py --run <新名字>                      # 评测当前代码：系统改过就换个名字，前后才能对比
 ```
 
 ## 关键取舍
@@ -248,8 +249,8 @@ npm run dev
 | [halluc_ab](eval/halluc_ab/summary.md) 引用标注对照 | `python src/s4_eval/halluc_ab_eval.py`（加 `--reuse-answers` 用已落盘答案零调用复算） | 是 |
 | [s5_perf](eval/reports/s5_perf.md) 端到端性能 | `python src/s5_eval/perf_bench.py` | 是 |
 | [answer_eval 基线](eval/answer_eval/baseline/report.md) 答案级评测（rag 模式） | `python src/answer_eval/run.py --run baseline --reuse`（流水线代码已改，只能用缓存复算） | 否（用缓存） |
-| [answer_eval Agent](eval/answer_eval/agent_v1/report.md) 答案级评测（agent 模式） | `python src/answer_eval/run.py --run agent_v1`（加 `--reuse` 用已落盘的答案与评审结果零调用重算） | 是 |
-| [Agent 多步任务集](eval/answer_eval/agent_v1/tasks/report.md)（另有[基线](eval/answer_eval/baseline/tasks/report.md)） | `python src/answer_eval/run.py --run agent_v1 --set tasks` | 是 |
+| [answer_eval Agent](eval/answer_eval/agent_v1/report.md) 答案级评测（agent 模式） | `python src/answer_eval/run.py --run agent_v1 --reuse`（评测后改过模型名和代码，只能用缓存复算；评测当前代码请换一个 `--run` 名字） | 否（用缓存） |
+| [Agent 多步任务集](eval/answer_eval/agent_v1/tasks/report.md)（另有[基线](eval/answer_eval/baseline/tasks/report.md)） | `python src/answer_eval/run.py --run agent_v1 --set tasks --reuse` | 否（用缓存） |
 | [两次评测对比](eval/answer_eval/compare_baseline_vs_agent_v1.md) | `python src/answer_eval/compare.py baseline agent_v1 [--set tasks]` | 否 |
 | [judge_probe](eval/answer_eval/baseline/judge_probe.md) 评审灵敏度测试 | `python src/answer_eval/probe.py` | 是 |
 
@@ -321,9 +322,9 @@ npm run dev
 - **引用粒度变粗**：Agent 爱用 Markdown 表格和列表，引用常只标在表头或小标题上，逐句口径下无引用句占比 dev 0.354、test 0.373（rag 模式 0.059、0.014），其中过半是表格行
 - **引用校验抓不到数值错误**：校验器只检查 chunk_id 是否来自本次工具返回的片段，以及句子的汉字二元组与片段（和换算/核对结果）的重合度；答案里的数字不逐个比对，把「允差 0.1 毫米」改成「5 毫米」不会被标为可疑。换算与限值核对本身是确定性的，但交给工具的参数（例如单位）仍可能被模型写错
 - **多轮只做了最基本的一层**：带最近 3 轮问答、追问由模型结合上文改写后检索；没有历史摘要、上下文预算和跨会话记忆，历史只存在浏览器本地
-- **成本与延迟**：Agent 的输入 token 是 rag 模式的 3.5–5.6 倍，单题成本 4.5–6.4 倍；需要调工具的多步任务平均 1.9 次模型调用，比 rag 模式慢约 1.8 秒。进程内第一次请求要加载 embedding 模型（约 0.6 秒），尚未在启动时预加载
+- **成本与延迟**：Agent 的输入 token 是 rag 模式的 3.5–5.6 倍，单题成本 4.5–6.4 倍；需要调工具的多步任务平均 1.9 次模型调用，比 rag 模式慢约 1.8 秒
 - **大表格的向量化仍被截断**：22 个表格 chunk 超过 embedding 模型 512 token 上限（最长 4464 token）；Agent 通过按行查表绕开了一部分（表格题 test 9/14 → 14/14），检索本身没有改
 - **rag 模式的问题仍在**：一个距离阈值两头出错（该答的被拦、语义相邻的库外题穿过），不看对话历史；保留它只作对照
-- **评测自身的局限**：两个答案级评测集都由 AI 编写、脚本校验，未经人工逐条复核；评审模型与生成模型相同，人工校准样本已导出但尚未标注；每个划分约 60 道应答题（任务集约 15 道），置信区间宽；模型名 `deepseek-chat` 是 DeepSeek 已公告停用的旧别名，目前由 deepseek-flash（V4.1-Flash）非思考模式提供服务
+- **评测自身的局限**：两个答案级评测集都由 AI 编写、脚本校验，未经人工逐条复核；评审模型与生成模型相同，人工校准样本已导出但尚未标注；每个划分约 60 道应答题（任务集约 15 道），置信区间宽；上面的评测用的是旧模型名 `deepseek-chat`（DeepSeek 已公告停用的别名，实际由 deepseek-flash 非思考模式提供服务），之后已改用 `deepseek-flash` 并显式关闭思考模式，只做了 13 题冒烟，未重跑全套评测
 - **仅本地离线开发环境验证**：未做并发压测与生产部署，SSE 流式在高并发下的稳定性未知
 - **知识库仅覆盖泵类设备**：4 份真实手册 + 3 份样例，跨品类泛化能力未验证

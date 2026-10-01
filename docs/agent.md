@@ -195,7 +195,7 @@
 
 1. **模型别名已经变了**：工具调用探测时发现接口返回的 `model` 字段是 `deepseek-flash`。DeepSeek 文档显示 `deepseek-chat` 是旧别名
    （2026-04-24 公告三个月后停用，目前仍可调用），现在由 V4.1-Flash 的非思考模式提供服务。本阶段两套系统用同一个模型名，对比不受影响；
-   Agent 模式的 `done` 事件和评测记录已保存接口返回的模型名。
+   Agent 模式的 `done` 事件和评测记录已保存接口返回的模型名。评测之后已改用 `deepseek-flash` 并显式关闭思考模式（process_log 第 20 条）。
 2. **工具缺单位，模型换了一个错的单位**：试问「管径 200mm 时允许的力矩 Mz（表中 85 daN·m）换算成 N·m」，换算工具不认识 daN·m 而报错，
    模型改用 kgf·m 重试，答出「85 daN·m = 85 kgf·m = 833.6 N·m」（正确是 850 N·m）。工具算得没错，错在模型交给它的单位。已补齐 daN·m 等单位。
 3. **限值先换算再核对被拒**：模型把手册限值 4 L/min 先换算成 0.24 m³/h 再交给 `check_value`，原文核对找不到 0.24 而报错；
@@ -210,21 +210,21 @@
 
 - **带引用的拒答**（第 5.5 节第 4 条）：产品上应把以拒答话术开头的回答按拒答展示；评测口径是否调整，要在人工复核后单独决定。
 - **引用粒度**：表格、列表按块标注引用，逐句口径下记为无引用。
-- **工具超时的竞态**：工具在线程池里执行，超时后线程仍在运行，可能与主线程同时改证据池（评测中 0 次超时，未触发）。
-  修法是在副本上执行、成功后再合并，留到工程化阶段（第 15 条）。
-- **「前面已给出全文」不准确**：表格先经 `lookup_table` 只给出部分行，之后检索再命中同一片段时，会被标成已给出全文。
-- **冷启动**：进程内第一次请求要加载 embedding 模型和 BM25 索引（约 0.6 秒），之后检索约 20–30 ms；应在服务启动时预加载（第 15 条）。
-- **模型名**：建议改用 `deepseek-flash` 并显式关闭思考模式，改后用 `run.py --run <新名字>` 重跑基线与 Agent 各一次。
-- 下一步按路线是第 8 条：数值与引用校验器 + 修复循环（上面的引用粒度、带引用的拒答都归到这里）。
+- **评测之后已修复**（process_log 第 20、21 条；只做了 13 题冒烟，未重跑全套评测）：
+  - 工具超时的竞态：改为在副本上执行，按时完成才合并进证据池。
+  - 「前面已给出全文」不准确：证据池记下每个片段给模型看了多少，只给过部分行的表格再出现时照常给出正文。
+  - 冷启动：服务启动时预加载，重启后首个请求的预检索从约 0.6 秒降到 17 ms。
+  - 模型名：改用 `deepseek-flash` 并显式关闭思考模式。
+- 下一步：先做 MCP Server，再做校验与修复（带引用的拒答、换算输入单位的核对归到这一步）。
 
 ## 复现
 
 ```bash
-# 主评测集：Agent（默认模式）与 rag 基线
-python src/answer_eval/run.py --run agent_v1 --mode agent
-python src/answer_eval/run.py --run baseline --reuse          # 基线只用缓存复算（流水线代码已改，按 system.json 记录的指纹）
+# 主评测集：Agent（默认模式）与 rag 基线。两者之后都改过代码（Agent 还改了模型名），只能用缓存复算（按 system.json 记录的指纹）
+python src/answer_eval/run.py --run agent_v1 --reuse
+python src/answer_eval/run.py --run baseline --reuse
 # Agent 多步任务集
-python src/answer_eval/run.py --run agent_v1 --mode agent --set tasks
+python src/answer_eval/run.py --run agent_v1 --set tasks --reuse
 python src/answer_eval/run.py --run baseline --set tasks --reuse
 # 并排对比
 python src/answer_eval/compare.py baseline agent_v1

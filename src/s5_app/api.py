@@ -10,6 +10,8 @@
 
 done 事件带 finish_reason，值为 "length" 时表示回答被 max_tokens 截断，前端据此提示。
 
+服务启动时预加载 embedding 模型、BM25、jieba 词典、表格行库和 Agent 图（_warm_up），首个请求不用再等加载。
+
 接口：
     GET  /api/health             健康检查（含知识库文档清单、默认模式）
     POST /api/ask                SSE 流式问答
@@ -24,6 +26,7 @@ import json
 import sys
 import time
 from collections import Counter
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 
@@ -46,6 +49,7 @@ from langchain_core.messages import AIMessageChunk, HumanMessage, SystemMessage 
 from llm_config import LLM_CONFIG, get_llm  # noqa: E402
 from graph import MAX_TOKENS, SYSTEM_PROMPT, TAU_DISTANCE, retrieve, verify_node  # noqa: E402
 from agent import CFG as AGENT_CFG, build_agent_graph, estimate_cost, initial_state  # noqa: E402
+from tools import get_corpus, hybrid_search  # noqa: E402
 from hybrid_retrieval import (  # noqa: E402
     _load_ctx,
     build_search_text,
@@ -60,7 +64,13 @@ def _config() -> dict:
     return yaml.safe_load((ROOT / "configs" / "config.yaml").read_text(encoding="utf-8"))
 
 
-app = FastAPI(title="设备运维知识问答 RAG API")
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    _warm_up()
+    yield
+
+
+app = FastAPI(title="设备运维知识问答 RAG API", lifespan=_lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -290,6 +300,19 @@ def _rag_events(question: str):
         )
     except Exception as exc:  # LLM 失败等一律显式推送，不静默
         yield _event("error", {"message": f"{type(exc).__name__}: {exc}"})
+
+
+def _warm_up() -> None:
+    """启动时预加载，并空跑一次检索（触发 embedding 模型、Chroma、BM25、jieba 词典的加载）。不调用大模型。
+
+    不做的话这些都推迟到第一个请求里加载，首问的检索多等约 0.6 秒。
+    """
+    t0 = time.perf_counter()
+    _chunk_index()
+    get_corpus()
+    build_agent_graph()
+    hybrid_search("水泵", 1)
+    print(f"预加载完成，用时 {(time.perf_counter() - t0) * 1000:.0f} ms", flush=True)
 
 
 class HistoryItem(BaseModel):

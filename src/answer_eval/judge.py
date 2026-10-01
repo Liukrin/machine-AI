@@ -1,6 +1,6 @@
 """评审模型（LLM-as-judge）：逐句忠实度与引用是否成立、关键事实是否答出。
 
-评审模型与生成模型是同一个（deepseek-chat），存在自评偏差，所以做了三件事来约束它：
+评审模型与生成模型是同一个（llm_config 里的 DeepSeek 模型），存在自评偏差，所以做了三件事来约束它：
   1. 让它对每个「有依据」的判断摘抄原文，代码再核对这段原文确实在片段里
      （忽略标点、空白与项目符号后逐字包含），摘抄对不上的判断不计入「严格忠实度」；
   2. 关键事实以确定性正则匹配为主指标，评审结果只作对照，两者不一致的条目列出来供人复核；
@@ -23,7 +23,7 @@ from langchain_core.messages import HumanMessage, SystemMessage  # noqa: E402
 from langchain_openai import ChatOpenAI  # noqa: E402
 
 from dataset import Corpus  # noqa: E402
-from llm_config import LLM_CONFIG  # noqa: E402
+from llm_config import LLM_CONFIG, client_kwargs  # noqa: E402
 from textnorm import loose, strip_citations  # noqa: E402
 
 SUPPORT_VALUES = ("full", "partial", "none", "na")
@@ -31,16 +31,15 @@ VERDICT_VALUES = ("present", "absent", "contradicted")
 
 
 class Judge:
-    def __init__(self, jcfg: dict, cache_path: Path):
+    def __init__(self, jcfg: dict, cache_path: Path, model: str | None = None):
         if not LLM_CONFIG["api_key"]:
             raise RuntimeError("DEEPSEEK_API_KEY 未设置，无法调用评审模型。")
         self.cfg = jcfg
-        self.model = LLM_CONFIG["model"]
-        self.llm = ChatOpenAI(
-            base_url=LLM_CONFIG["base_url"], model=self.model, api_key=LLM_CONFIG["api_key"],
-            temperature=float(jcfg["temperature"]),
-            extra_body={"max_tokens": int(jcfg["max_tokens"]), "response_format": {"type": "json_object"}},
-        )
+        # 评审身份：写进缓存键和报告。--reuse 复算旧评测时传入当时记录的模型名（只查缓存、不调用），
+        # 这样模型改名（deepseek-chat → deepseek-flash）之前的评审缓存仍然能用
+        self.model = model or LLM_CONFIG["model"]
+        self.llm = ChatOpenAI(**client_kwargs(temperature=float(jcfg["temperature"]), max_tokens=int(jcfg["max_tokens"]),
+                                              response_format={"type": "json_object"}))
         self.prompts = {
             "faithfulness": (ROOT / jcfg["faithfulness_prompt"]).read_text(encoding="utf-8"),
             "facts": (ROOT / jcfg["facts_prompt"]).read_text(encoding="utf-8"),

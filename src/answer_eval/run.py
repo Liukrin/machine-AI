@@ -54,6 +54,15 @@ def cost_upper(s: dict, pricing: dict) -> float | None:
     return (s["input_tokens"] * pricing["input_cache_miss"] + (s.get("output_tokens") or 0) * pricing["output"]) / 1e6
 
 
+def recorded_judge_model(set_dir: Path) -> str | None:
+    """评测目录里 metrics.json 记录的评审模型名；没有记录（或当时没跑评审）返回 None，用当前模型。"""
+    path = set_dir / "metrics.json"
+    if not path.exists():
+        return None
+    name = (json.loads(path.read_text(encoding="utf-8")).get("meta") or {}).get("judge_model")
+    return name if name and name != "未运行" else None
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="答案级评测（一条命令）")
     ap.add_argument("--run", default="", help="评测名（结果目录名）；默认读 config answer_eval.run")
@@ -150,7 +159,9 @@ def main() -> None:
     if not args.no_judge:
         from judge import Judge, run_jobs
 
-        judge = Judge(acfg["judge"], set_dir / "judgments.jsonl")
+        # --reuse 只查缓存：评审身份沿用这次评测当时记录的模型名（模型后来改过名也能零调用复算）
+        judge = Judge(acfg["judge"], set_dir / "judgments.jsonl",
+                      model=recorded_judge_model(set_dir) if args.reuse else None)
         judge_model, judge_prompt = judge.model, judge.prompt_hash()
         if args.reuse:
             judge.reuse_only = True

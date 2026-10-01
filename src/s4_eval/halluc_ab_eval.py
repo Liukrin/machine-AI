@@ -61,7 +61,7 @@ for _p in (ROOT / "src", ROOT / "src" / "s3_eval", ROOT / "src" / "s4_agent"):
 import yaml  # noqa: E402
 from langchain_core.messages import HumanMessage, SystemMessage  # noqa: E402
 from langchain_openai import ChatOpenAI  # noqa: E402
-from llm_config import LLM_CONFIG, max_tokens_body  # noqa: E402
+from llm_config import LLM_CONFIG, client_kwargs  # noqa: E402
 from graph import PROMPT_VERSION, TAU_DISTANCE, load_prompt  # noqa: E402
 from hybrid_retrieval import build_search_text, hybrid_retrieve, vector_top1_distance  # noqa: E402
 from verify import CHUNK_ID_RE, _move_citations_before_punct, verify_citation  # noqa: E402
@@ -212,12 +212,10 @@ def ensure_cache(qa_set: list[dict], top_k: int, cache_path: Path, meta_path: Pa
 
 # --------------------------------------------------------------------------- 生成
 def make_llm(temperature: float, max_tokens: int):
-    """生成上限经 extra_body 传 max_tokens（原因见 llm_config.max_tokens_body）。"""
+    """生成上限经 extra_body 传 max_tokens（原因见 llm_config.client_kwargs）。"""
     if not LLM_CONFIG["api_key"]:
         raise RuntimeError("DEEPSEEK_API_KEY 未设置，无法调用 LLM。请先配置 .env。")
-    return ChatOpenAI(base_url=LLM_CONFIG["base_url"], model=LLM_CONFIG["model"],
-                      api_key=LLM_CONFIG["api_key"], temperature=temperature,
-                      **max_tokens_body(max_tokens))
+    return ChatOpenAI(**client_kwargs(temperature=temperature, max_tokens=max_tokens))
 
 
 def gen_answer(llm, system_prompt: str, question: str, chunks: list[dict],

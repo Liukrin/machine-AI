@@ -87,7 +87,7 @@ class AgentState(TypedDict):
     history_question: str          # 上一轮用户的问题（预检索时拼在一起）
     llm_calls: int
     tool_rounds: int
-    seen: dict                     # 证据池：本次给模型看过的片段 {chunk_id: {"distance": …}}，保持首次出现的顺序
+    seen: dict                     # 证据池：本次给模型看过的片段 {chunk_id: {"distance": …, "shown": …}}，保持首次出现的顺序
     steps: Annotated[list, operator.add]
     usage: dict                    # 各次模型调用累计：input / output / cache_read
     answer: str
@@ -136,8 +136,14 @@ def initial_state(question: str, history: list[dict] | None = None) -> dict:
 
 # --------------------------------------------------------------------------- 工具执行（超时、出错都变成观察结果）
 def _run_tool(tb: Toolbox, name: str, args: dict) -> tuple[ToolResult, float]:
+    """在工具箱的副本上执行，按时完成才把新给模型看的片段并回证据池。
+
+    超时后工作线程停不下来、会接着跑完；它改的只是副本，碰不到本次回答的证据池，
+    也不会和同一轮里后面的工具调用同时改同一份数据。
+    """
     t0 = time.perf_counter()
-    fut = _POOL.submit(tb.run, name, args)
+    work = tb.fork()
+    fut = _POOL.submit(work.run, name, args)
     try:
         res = fut.result(timeout=TOOL_TIMEOUT_S)
     except FuturesTimeout:
@@ -145,6 +151,8 @@ def _run_tool(tb: Toolbox, name: str, args: dict) -> tuple[ToolResult, float]:
                          f"超时（>{TOOL_TIMEOUT_S:g} 秒）")
     except Exception as exc:  # 工具内部的意外错误也回给模型，不中断整个回答
         res = ToolResult(False, f"工具调用失败：{type(exc).__name__}: {exc}", f"{type(exc).__name__}")
+    else:
+        tb.merge(work)
     return res, round((time.perf_counter() - t0) * 1000, 1)
 
 

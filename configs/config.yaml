@@ -124,7 +124,7 @@ agent:
   refusal_markers: [检索内容不足, 知识库无相关内容, 无法回答, 未能找到相关]
 
 # 单题成本估算用的模型单价（元/百万 tokens）。DeepSeek 官网 2026-09-30 的价格：
-# config 里的模型名 deepseek-chat 是旧别名，接口返回的 model 字段为 deepseek-flash（V4.1-Flash），按 Flash 价格估算；
+# 模型为 deepseek-flash（V4.1-Flash，非思考模式，见 src/llm_config.py），按 Flash 价格估算；
 # 取高峰时段价格作为上限（空闲时段为一半）。https://api-docs.deepseek.com/zh-cn/quick_start/pricing
 llm_pricing:
   input_cache_hit: 0.04

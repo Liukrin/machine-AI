@@ -238,26 +238,54 @@ def hybrid_search(query: str, top_k: int, doc_id: str | None = None,
 
 
 # --------------------------------------------------------------------------- 工具箱
+_SHOWN_RANK = {"rows": 1, "head": 2, "full": 3}
+
+
 class Toolbox:
-    """一次回答里的工具执行环境。seen 是本次对话已经给模型看过的片段（证据池），跨轮次累积。"""
+    """一次回答里的工具执行环境。
+
+    seen 是本次对话已经给模型看过的片段（证据池），跨轮次累积：{chunk_id: {"distance": …, "shown": …}}。
+    shown 记给模型看了多少：full 全文；head 长表格只给了开头（截断）；rows 只给了查表命中的几行。
+    片段再次出现时，full 只给一行「前面已给出全文」，head 只给一行提示，rows 照常给正文。
+    """
 
     def __init__(self, cfg: dict, tau: float, seen: dict[str, dict] | None = None):
         self.cfg = cfg
         self.tau = tau
         self.corpus = get_corpus()
-        self.seen: dict[str, dict] = dict(seen or {})
+        self.seen: dict[str, dict] = {cid: dict(v) for cid, v in (seen or {}).items()}
 
-    # ---- 片段展示：已给过全文的只给一行，省 token
+    def fork(self) -> "Toolbox":
+        """副本：工具在副本上执行，按时完成才并回（agent._run_tool），超时还在跑的线程改不到证据池。"""
+        return Toolbox(self.cfg, self.tau, self.seen)
+
+    def merge(self, other: "Toolbox") -> None:
+        self.seen.update(other.seen)
+
+    def _mark(self, cid: str, distance: float | None, shown: str, new: list[dict]) -> None:
+        """记进证据池（新片段同时记进 new）；shown 只升不降：看过全文的片段，之后再查到几行也还算看过全文。"""
+        old = self.seen.get(cid)
+        if old is None:
+            self.seen[cid] = {"distance": distance, "shown": shown}
+            new.append({"chunk_id": cid, "distance": distance})
+        elif _SHOWN_RANK[shown] > _SHOWN_RANK[old.get("shown", "full")]:
+            self.seen[cid] = {**old, "shown": shown}
+
+    # ---- 片段展示：已给过的只给一行，省 token
     def _show(self, cid: str, distance: float | None, new: list[dict]) -> str:
         c = self.corpus.by_id[cid]
         dist = "" if distance is None else f" · 距离 {distance:.3f}"
-        if cid in self.seen:
+        shown = (self.seen.get(cid) or {}).get("shown")
+        if shown == "full":
             return f"[{cid}] {self.corpus.header(c)}{dist}（前面已给出全文）"
+        if shown == "head":
+            return f"[{cid}] {self.corpus.header(c)}{dist}（前面已给出开头部分；表格较长，要查具体行请用 lookup_table）"
         body = self.corpus.body(c)
+        part = "full"
         if c["chunk_type"] == "table" and len(body) > TABLE_MAX_CHARS:
             body = body[:TABLE_MAX_CHARS] + "\n……（表格较长，已截断；要查具体行请用 lookup_table）"
-        self.seen[cid] = {"distance": distance}
-        new.append({"chunk_id": cid, "distance": distance})
+            part = "head"
+        self._mark(cid, distance, part, new)
         return f"[{cid}] {self.corpus.header(c)}{dist}\n{body}"
 
     def search_manuals(self, query: str, manual: str | None = None, kind: str | None = None) -> ToolResult:
@@ -307,9 +335,7 @@ class Toolbox:
                 break
             c = self.corpus.by_id[cid]
             n_rows = self.corpus.tables.n_rows_of(cid)
-            if cid not in self.seen:
-                self.seen[cid] = {"distance": None}
-                new.append({"chunk_id": cid, "distance": None})
+            self._mark(cid, None, "full" if n_rows <= SMALL_TABLE_ROWS else "rows", new)
             lines = [f"[{cid}] {self.corpus.header(c)}（共 {n_rows} 行）"]
             if n_rows <= SMALL_TABLE_ROWS:          # 小表整表给出
                 lines += [f"  {' | '.join(r)}" for r in table_rows(c["table_html"])]
