@@ -30,3 +30,6 @@ fastapi==0.141.1
 uvicorn==0.52.4
 sse-starlette==3.4.8
 pydantic==2.13.4
+
+# ---- MCP Server（src/s5_app/mcp_server.py，官方 Python SDK）----
+mcp==2.2.0

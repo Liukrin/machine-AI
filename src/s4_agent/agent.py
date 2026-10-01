@@ -23,8 +23,6 @@ import operator
 import re
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeout
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, TypedDict
@@ -43,7 +41,7 @@ from langgraph.graph import END, StateGraph  # noqa: E402
 from langgraph.graph.message import add_messages  # noqa: E402
 
 from llm_config import get_llm  # noqa: E402
-from tools import TOOL_LABEL, Toolbox, ToolResult, get_corpus, tool_specs  # noqa: E402
+from tools import TOOL_LABEL, Toolbox, ToolResult, get_corpus, run_tool, tool_specs  # noqa: E402
 from verify import verify_citation  # noqa: E402
 
 _CFG = yaml.safe_load((ROOT / "configs" / "config.yaml").read_text(encoding="utf-8"))
@@ -77,7 +75,6 @@ def render_system_prompt() -> str:
 
 SYSTEM_PROMPT = render_system_prompt()
 MANUAL_IDS = list(DOCUMENTS)
-_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="agent-tool")
 
 
 # --------------------------------------------------------------------------- 状态
@@ -134,28 +131,7 @@ def initial_state(question: str, history: list[dict] | None = None) -> dict:
     }
 
 
-# --------------------------------------------------------------------------- 工具执行（超时、出错都变成观察结果）
-def _run_tool(tb: Toolbox, name: str, args: dict) -> tuple[ToolResult, float]:
-    """在工具箱的副本上执行，按时完成才把新给模型看的片段并回证据池。
-
-    超时后工作线程停不下来、会接着跑完；它改的只是副本，碰不到本次回答的证据池，
-    也不会和同一轮里后面的工具调用同时改同一份数据。
-    """
-    t0 = time.perf_counter()
-    work = tb.fork()
-    fut = _POOL.submit(work.run, name, args)
-    try:
-        res = fut.result(timeout=TOOL_TIMEOUT_S)
-    except FuturesTimeout:
-        res = ToolResult(False, f"工具调用失败：执行超过 {TOOL_TIMEOUT_S:g} 秒仍未完成，已放弃。可以换个参数重试或直接作答。",
-                         f"超时（>{TOOL_TIMEOUT_S:g} 秒）")
-    except Exception as exc:  # 工具内部的意外错误也回给模型，不中断整个回答
-        res = ToolResult(False, f"工具调用失败：{type(exc).__name__}: {exc}", f"{type(exc).__name__}")
-    else:
-        tb.merge(work)
-    return res, round((time.perf_counter() - t0) * 1000, 1)
-
-
+# --------------------------------------------------------------------------- 工具事件（工具的执行器 run_tool 在 tools.py，与 MCP Server 共用）
 def _tool_events(writer, call_id: str, rnd: int, name: str, args: dict, res: ToolResult, ms: float,
                  auto: bool = False) -> dict:
     """工具结束事件（前端时间线、评测记录共用）。换算、核对的输出原文一并带上（评测做数值溯源）。"""
@@ -178,7 +154,7 @@ def presearch(state: AgentState) -> dict:
     args = {"query": query}
     writer({"type": "tool_start", "id": "presearch", "round": 0, "name": "search_manuals",
             "label": TOOL_LABEL["search_manuals"], "args": args, "auto": True})
-    res, ms = _run_tool(tb, "search_manuals", args)
+    res, ms = run_tool(tb, "search_manuals", args, TOOL_TIMEOUT_S)
     ev = _tool_events(writer, "presearch", 0, "search_manuals", args, res, ms, auto=True)
     call = {"name": "search_manuals", "args": args, "id": "presearch", "type": "tool_call"}
     return {"messages": [AIMessage(content="", tool_calls=[call]),
@@ -241,7 +217,7 @@ def tools(state: AgentState) -> dict:
             res, ms = ToolResult(False, f"工具调用失败：一轮最多执行 {MAX_CALLS_PER_ROUND} 个工具调用，这一个没有执行。",
                                  "超出单轮调用数上限"), 0.0
         else:
-            res, ms = _run_tool(tb, name, args)
+            res, ms = run_tool(tb, name, args, TOOL_TIMEOUT_S)
         steps.append(_tool_events(writer, call["id"], rnd, name, args, res, ms))
         out.append(ToolMessage(content=res.content, tool_call_id=call["id"], name=name,
                                status="success" if res.ok else "error"))

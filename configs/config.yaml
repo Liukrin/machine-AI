@@ -90,6 +90,7 @@ prompts:
   B: configs/prompts/B_end_citation.txt           # 答案末尾标注引用（切换前的线上版本）
   C: configs/prompts/C_per_sentence_citation.txt  # 每一句末尾标注引用（rag 模式在用的版本）
   agent: configs/prompts/agent.txt                # 工具调用 Agent 的系统提示词（{catalog} 处填手册清单）
+  mcp: configs/prompts/mcp.txt                    # MCP Server 的使用说明（握手时发给客户端，{catalog} 处填手册清单）
 
 s4_agent:
   # rag 模式（固定流水线：检索 → 拒答闸 → 生成 → 引用校验）的参数，graph.py 与 api.py 共用；

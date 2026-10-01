@@ -1,6 +1,6 @@
 # 机械设备运维知识问答 RAG 平台
 
-面向泵类设备维修手册的检索增强生成（RAG）问答系统：PDF 手册 → 解析切分 → 向量/BM25 混合检索 → LangGraph 工具调用 Agent（检索、按行查表、读相邻片段、单位换算、限值核对）→ 流式问答。每句回答标注出处，点开可核对手册原文；单位换算和「实测值是否超出手册限值」由确定性代码计算，不交给模型。阶段 1 的固定流水线（retrieve → 拒答闸 → generate → verify）保留为 rag 模式，作为对照基线。embedding 模型本地离线加载，生成调用 DeepSeek API；仅在开发环境验证。
+面向泵类设备维修手册的检索增强生成（RAG）问答系统：PDF 手册 → 解析切分 → 向量/BM25 混合检索 → LangGraph 工具调用 Agent（检索、按行查表、读相邻片段、单位换算、限值核对）→ 流式问答。每句回答标注出处，点开可核对手册原文；单位换算和「实测值是否超出手册限值」由确定性代码计算，不交给模型。同一组工具也以 MCP Server 提供，Claude Code 等客户端可以直接调用它们查手册。阶段 1 的固定流水线（retrieve → 拒答闸 → generate → verify）保留为 rag 模式，作为对照基线。embedding 模型本地离线加载，生成调用 DeepSeek API；仅在开发环境验证。
 
 ## 关键结果
 
@@ -48,13 +48,36 @@ flowchart LR
     B --> C["S3 混合检索<br/>BM25 + 向量 RRF 融合<br/>每次取 top 5"]
     C --> D["S4 工具调用 Agent<br/>预检索 → 模型 ⇄ 工具 → 引用校验<br/>（rag 模式：检索 → 拒答闸 → 生成）"]
     D --> E["S5 前后端<br/>FastAPI SSE 流式<br/>Vite + React 前端"]
+    D -. 同一组工具 .-> F["MCP Server（stdio）<br/>Claude Code 等客户端调用"]
 ```
 
 - **Agent 图**（[`src/s4_agent/agent.py`](src/s4_agent/agent.py)）：系统先用原问题检索一次（有对话历史时拼上上一问）；模型读结果后直接作答，或调用工具继续查——`search_manuals`（可限定手册、正文/表格）、`lookup_table`（表格按行入库到内存 SQLite，按关键词查行）、`read_section`（读相邻片段）、`convert_unit`（换算）、`check_value`（实测值与手册限值比较）。工具轮数上限 3、单个工具超时 10 秒，工具出错作为观察结果回给模型；最后做引用校验。实测主集 dev 67/77、test 62/73 的题看完预检索结果就作答，只调一次模型。
 - **API 直接执行这张图**：[`src/s5_app/api.py`](src/s5_app/api.py) 用 `graph.stream(stream_mode=["messages", "custom", "values"])` 同时推送模型逐 token 输出、每个工具调用的开始/结束和最终状态；`/api/ask` 接受对话历史（最近 3 轮）。
+- **MCP Server**（[`src/s5_app/mcp_server.py`](src/s5_app/mcp_server.py)）：同样五个工具用 MCP（官方 Python SDK）提供，定义和执行器与 Agent 共用，见下文「MCP Server」。
 - **确定性的部分**：单位换算的系数取定义值；「是否超限」由代码比较，且限值必须出自本次检索到的片段、数字要能在原文里找到；Agent 没有向量距离闸，距离只用来提示模型「相关度低」。
 - **rag 模式**（请求里 `mode=rag`，前端「直接检索」）：阶段 1 的固定流水线，检索后取向量 top-1 distance 与 τ=0.3567 比较，超阈值直接返回「知识库无相关内容」、不调用 LLM，否则生成一次（[`src/s4_agent/graph.py`](src/s4_agent/graph.py)）。
 - **参数集中在 config**：两种模式的提示词版本、检索条数、生成上限、Agent 的轮数与超时、对话历史长度都在 [`configs/config.yaml`](configs/config.yaml)（`s4_agent`、`agent` 段）；提示词存在 [`configs/prompts/`](configs/prompts/)，评测脚本读的是同一批文件。设计细节与取舍见 [docs/agent.md](docs/agent.md)。
+
+## MCP Server：在 Claude Code 里直接查手册
+
+> Agent 的五个工具也以 [MCP](https://modelcontextprotocol.io) 服务的形式提供，Claude Code、Cursor 这类客户端里的模型可以直接调用它们。
+
+- **同一份定义、同一个执行器**：参数说明和手册编号枚举来自 [`tool_schema.py`](src/s4_agent/tool_schema.py)，执行走 `tools.run_tool`（参数校验、10 秒超时、出错作为结果返回），与 Agent 相同。工具都是确定性代码，不调用大模型，不需要 DeepSeek API Key。
+- **约束照旧**：一个客户端会话对应一个服务进程，进程内保留证据池。`check_value` 的限值必须出自本会话里检索到的片段、数字要能在原文里找到，`read_section` 也只接受出现过的片段。工具出错时返回 `isError`，错误信息原样交给客户端的模型去修正参数。
+- **和 Agent 的差别**：重复出现的片段照样给出正文，不省略成「前面已给出全文」，因为客户端自己管理上下文，之前给过的全文可能已经被压缩掉。
+- **启动不卡握手**：检索依赖（torch、embedding 模型、Chroma、BM25）在后台线程加载；握手和列工具不用等（工具定义只依赖 pydantic），第一次调用工具时才等加载完成。握手时把手册清单和用法说明（[`configs/prompts/mcp.txt`](configs/prompts/mcp.txt)）发给客户端；工具都标注为只读（`readOnlyHint`）、不访问外部系统（`openWorldHint: false`）。
+
+**在 Claude Code 里使用**：仓库根目录的 [`.mcp.json`](.mcp.json) 已登记服务器 `equip-manuals`，启动命令是 `${MACHINE_AI_PYTHON:-python} src/s5_app/mcp_server.py`。在装好依赖的 Python 环境里启动 Claude Code，或者把环境变量 `MACHINE_AI_PYTHON` 设为该环境的 python 路径。首次使用时确认启用这个项目级服务器，然后直接提问，例如「用 equip-manuals 查一下 Model 3700 轴承温度实测 185°F 是否超限」。其他支持 stdio 的 MCP 客户端，用同样的启动命令登记即可（未逐一实测）。
+
+**自检**（不需要 API Key）：
+
+```bash
+python scripts/mcp_smoke.py
+```
+
+[`scripts/mcp_smoke.py`](scripts/mcp_smoke.py) 用官方 SDK 的客户端启动服务、握手、列工具，再逐个调用工具核对结果，共 15 项。正常路径包括：检索到限值片段、限值核对给出「超出上限」、换算 0.2 m³/h = 3.333 L/min、查表命中正确的行。异常路径包括：编造的限值、本会话没出现过的片段、不认识的单位、不存在的工具，都按预期报错。
+
+本机实测 15 项全部通过：握手 767 ms，列工具 3 ms，第一次调用连同等待后台加载 6.5 秒，之后每次检索约 20 ms。`claude mcp get equip-manuals` 显示 `✓ Connected`，五个工具在 Claude Code 里注册为 `mcp__equip-manuals__*`。
 
 ## 核心数据
 
@@ -237,7 +260,7 @@ npm install
 npm run dev
 ```
 
-接口：`GET /api/health`（健康检查、文档清单、默认模式）、`POST /api/ask`（SSE 流式问答，请求体 `{question, history?, mode?}`，`mode` 为 `agent`（默认）或 `rag`，事件格式见 [docs/agent.md](docs/agent.md) 第 4 节）、`GET /api/chunks/{chunk_id}`（片段原文）。命令行试问 Agent：`python src/s4_agent/agent.py "问题"`。
+接口：`GET /api/health`（健康检查、文档清单、默认模式）、`POST /api/ask`（SSE 流式问答，请求体 `{question, history?, mode?}`，`mode` 为 `agent`（默认）或 `rag`，事件格式见 [docs/agent.md](docs/agent.md) 第 4 节）、`GET /api/chunks/{chunk_id}`（片段原文）。命令行试问 Agent：`python src/s4_agent/agent.py "问题"`。在 Claude Code 里直接调用工具查手册见上文「MCP Server」。
 
 ### 复现评测
 
@@ -262,8 +285,10 @@ npm run dev
 .
 ├── configs/
 │   ├── config.yaml            # 所有路径与参数（脚本内不硬编码）
-│   └── prompts/               # 系统提示词：rag 模式 A/B/C 三个版本、Agent、评审模型
-├── scripts/build_index.py     # 一键重建知识库（S1 解析 → S2 索引）
+│   └── prompts/               # 系统提示词：rag 模式 A/B/C 三个版本、Agent、评审模型、MCP 使用说明
+├── scripts/
+│   ├── build_index.py         # 一键重建知识库（S1 解析 → S2 索引）
+│   └── mcp_smoke.py           # MCP Server 自检（官方 SDK 客户端，15 项）
 ├── data/                      # 不入仓库
 │   ├── raw_pdf/               # 7 份 PDF：4 份真实手册（1.pdf–4.pdf）+ 3 份自造样例（sample_*）
 │   ├── parsed_md/             # MinerU 解析产物（blocks.jsonl + 每本一目录）
@@ -281,10 +306,10 @@ npm run dev
 │   ├── s1_ingest/             # MinerU 解析 → 结构化 → 质检
 │   ├── s2_index/              # 清洗 → 合并 chunk → 向量化 → BM25
 │   ├── s3_eval/               # 评测集构建 + 混合检索（线上检索也在这里）+ rerank 对照
-│   ├── s4_agent/              # agent.py 工具调用图、tools.py 五个工具、units.py 换算与限值比较、
-│   │                          # tables.py 表格按行入库；graph.py 固定流水线（rag 模式）；verify.py 引用校验
+│   ├── s4_agent/              # agent.py 工具调用图、tools.py 五个工具与执行器、tool_schema.py 工具参数定义、
+│   │                          # units.py 换算与限值比较、tables.py 表格按行入库；graph.py 固定流水线（rag 模式）；verify.py 引用校验
 │   ├── s4_eval/               # 引用标注对照评测脚本
-│   ├── s5_app/                # FastAPI 后端（SSE）
+│   ├── s5_app/                # api.py FastAPI 后端（SSE）；mcp_server.py MCP Server（stdio）
 │   ├── s5_eval/               # 端到端性能基准脚本
 │   ├── answer_eval/           # 答案级评测：校验、取系统输出、确定性评分、评审模型、报告、校准
 │   └── llm_config.py          # DeepSeek 配置
@@ -295,6 +320,7 @@ npm run dev
 │   ├── process_log.md         # 开发过程与失败记录
 │   └── badcase.md             # 已知缺陷与边界分析
 ├── CLAUDE.md                  # 项目施工手册
+├── .mcp.json                  # Claude Code 项目级 MCP 配置（登记 equip-manuals 服务器）
 ├── requirements.txt           # 应用与评测环境
 └── requirements-parse.txt     # S1 PDF 解析环境（MinerU）
 ```
@@ -313,6 +339,17 @@ npm run dev
 另有 3 份自造样例手册：sample_cooler_manual / sample_pump_manual / sample_valve_manual，由 [src/s1_ingest/_make_sample_pdfs.py](src/s1_ingest/_make_sample_pdfs.py) 生成，内容为虚构示例，S1 阶段用于打通解析流程，建库时未剔除，同样已入库可被检索（18 条 chunk，详见 [docs/badcase.md](docs/badcase.md) 案例 7）。
 
 **仅用于开发环境的检索/生成能力验证**，不用于生产或商业用途。embedding / rerank 模型本地离线加载（`local_files_only=True`），运行时不联网下载模型；回答生成调用 DeepSeek 云端 API，需要联网和 API key。
+
+## 怎么用 Claude Code 开发这个项目
+
+> 项目在 Claude Code 里迭代完成，下面是实际用到、对结果有影响的做法。
+
+- **用 [CLAUDE.md](CLAUDE.md) 定规矩**：三条禁止项、三条工作方式，Claude Code 每次会话自动加载。禁止项是：指标不理想时不许反复调参补救；不许用假模型兜底，也不许运行时联网下载模型；物理阈值判定只能由确定性代码执行。工作方式是：一次只做一个任务、做完停下；不经要求不装包、不动 `data/`；文字结论要和本次运行打印的数字逐条对账。`check_value` 工具「限值必须出自片段原文、由代码比较」就是落实第三条禁止项。
+- **先建评测、再改系统**：先写 150 题答案级评测集和评分脚本，用当时的系统跑出基线，看清失分来自拒答闸误拒和检索未召回、不是生成，再决定阶段 2 做 Agent。多步任务集在写 Agent 之前定稿，并先用旧系统生成基线答案。阶段 2 只在 dev 上迭代，定稿后 test 只跑一次。
+- **分阶段推进、每步停下确认**：改造路线按阶段拆开，每个阶段做完先看报告、确认后再提交；路线中途按实际情况删减过。
+- **失败都记下来**：开发中踩的坑都写在 [docs/process_log.md](docs/process_log.md)，每条写现象和教训。例如 max_tokens 被 SDK 改名后一直没生效、事实正则漏判正确写法、模型改名让旧评测的评审缓存失效。
+- **在真实界面里验证**：前后端用 Claude Code 的预览服务器启动，前端改完在内置浏览器里实际点一遍；README 截图用无头浏览器生成。
+- **把工具接回 Claude Code**：本项目的 MCP Server 登记在 [`.mcp.json`](.mcp.json)，在 Claude Code 里可以直接调用这些工具查手册（见「MCP Server」）。
 
 ## 已知局限
 

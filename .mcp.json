@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "equip-manuals": {
+      "type": "stdio",
+      "command": "${MACHINE_AI_PYTHON:-python}",
+      "args": ["src/s5_app/mcp_server.py"]
+    }
+  }
+}

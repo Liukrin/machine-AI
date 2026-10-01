@@ -11,15 +11,20 @@
 
 工具出错（参数不对、片段不存在、单位不认识）时返回 ok=False 的结果，错误信息原样作为观察结果回给模型，
 由模型修正参数后重试；不抛异常、不中断回答。
+
+参数定义（发给模型的 JSON Schema）在 tool_schema.py；执行器 run_tool（超时、出错转成结果）在本文件末尾，
+Agent（agent.py）与 MCP Server（src/s5_app/mcp_server.py）共用。
 """
 from __future__ import annotations
 
 import re
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
 
 ROOT = Path(__file__).resolve().parents[2]
 for _p in ("src", "src/s3_eval", "src/s4_agent"):
@@ -27,90 +32,16 @@ for _p in ("src", "src/s3_eval", "src/s4_agent"):
         sys.path.insert(0, str(ROOT / _p))
 
 import numpy as np  # noqa: E402
-from pydantic import BaseModel, Field, ValidationError  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
 
 from hybrid_retrieval import _load_ctx, build_search_text, tokenize  # noqa: E402
 from tables import TableStore, table_rows  # noqa: E402
+from tool_schema import TOOL_ARGS, TOOL_LABEL, tool_specs  # noqa: E402,F401  agent.py 也从这里导入
 from units import UnitError, compare, convert, fmt, numbers_in_text, same_unit, unit_display  # noqa: E402
 
 PREVIEW_CHARS = 100        # 前端来源卡片的预览长度
 TABLE_MAX_CHARS = 2000     # 检索结果里单个表格片段最多给模型看多少字，超出截断并提示改用 lookup_table
 SMALL_TABLE_ROWS = 6       # 查表命中小表（不超过这么多行）时整表返回：竖排的小表单看一行没有意义
-
-
-# --------------------------------------------------------------------------- 工具参数（发给模型的 JSON Schema）
-class SearchManualsArgs(BaseModel):
-    """在维修手册中检索（BM25 + 向量混合检索），返回最相关的若干片段及其 chunk_id。"""
-    query: str = Field(description="检索问句或关键词。写全设备型号和部件名称，用手册里的说法，不要用代词或「那个」")
-    manual: str | None = Field(None, description="只在某一本手册里检索，填手册编号（见手册清单）；不确定就不填")
-    kind: Literal["text", "table"] | None = Field(None, description="只检索正文（text）或只检索表格（table）；不填则都检索")
-
-
-class LookupTableArgs(BaseModel):
-    """在手册的表格里按关键词查找行（零件编号、故障原因、扭矩、规格参数等），返回命中的行和表头。"""
-    keywords: str = Field(description="关键词，多个用空格分开，命中的行须同时包含全部关键词（如「泵轴」「Fy」「电机 电力」）。"
-                                      "关键词要短，用手册表格里会出现的字眼")
-    manual: str | None = Field(None, description="只查某一本手册的表格，填手册编号；不确定就不填")
-
-
-class ReadSectionArgs(BaseModel):
-    """读取某个片段前后相邻的片段（同一本手册），用于答案被切到相邻片段、需要上下文的情况。"""
-    chunk_id: str = Field(description="本次对话里出现过的 chunk_id")
-    before: int = Field(1, ge=0, le=2, description="向前读几个片段（0~2）")
-    after: int = Field(1, ge=0, le=2, description="向后读几个片段（0~2）")
-
-
-class ConvertUnitArgs(BaseModel):
-    """单位换算（确定性计算）。凡是答案里需要换算单位的数值，都必须用它算，不要心算。"""
-    value: float = Field(description="要换算的数值")
-    from_unit: str = Field(description="原单位，如 m³/h、bar、°C、N·m、mm")
-    to_unit: str = Field(description="目标单位，如 L/min、psi、°F、kgf·m、in")
-    is_difference: bool = Field(False, description="是否为温差/温升（如「高出 3℃」）：是则 °C→°F 只乘 9/5、不加 32")
-
-
-class CheckValueArgs(BaseModel):
-    """判断一个实测值或设定值是否在手册规定的范围内（确定性比较，结论以本工具为准）。
-    限值必须是本次对话里某个片段原文写明的数值，并给出该片段的 chunk_id；单位不同会先换算再比较。"""
-    value: float = Field(description="实测值或设定值")
-    unit: str = Field(description="value 的单位")
-    source_chunk_id: str = Field(description="写有该限值的片段 chunk_id（必须是本次对话里工具返回过的片段）")
-    limit_max: float | None = Field(None, description="上限：照抄片段原文写明的数值（手册写「不超过」「最大」「≤」的那个数），"
-                                                      "不要自己换算；没有上限就不填")
-    limit_min: float | None = Field(None, description="下限：照抄片段原文写明的数值（手册写「不低于」「至少」「≥」的那个数），"
-                                                      "不要自己换算；没有下限就不填")
-    limit_unit: str | None = Field(None, description="限值在原文里的单位。与 unit 不同时由工具换算后再比较；相同可不填")
-
-
-TOOL_ARGS: dict[str, type[BaseModel]] = {
-    "search_manuals": SearchManualsArgs,
-    "lookup_table": LookupTableArgs,
-    "read_section": ReadSectionArgs,
-    "convert_unit": ConvertUnitArgs,
-    "check_value": CheckValueArgs,
-}
-TOOL_LABEL = {"search_manuals": "检索手册", "lookup_table": "查表", "read_section": "读相邻片段",
-              "convert_unit": "单位换算", "check_value": "限值核对"}
-
-
-def tool_specs(manual_ids: list[str]) -> list[dict]:
-    """OpenAI 格式的工具定义（bind_tools 用）。manual 参数列出可选的手册编号。"""
-    specs = []
-    for name, model in TOOL_ARGS.items():
-        schema = model.model_json_schema()
-        schema.pop("title", None)
-        schema.pop("description", None)          # 与函数描述重复
-        for prop in schema.get("properties", {}).values():
-            prop.pop("title", None)
-            if prop.get("anyOf") and any(x.get("type") == "null" for x in prop["anyOf"]):
-                # Optional[X] 展开成 X，并标注可以不填（DeepSeek 对 anyOf 的支持不如普通类型稳定）
-                inner = [x for x in prop.pop("anyOf") if x.get("type") != "null"][0]
-                prop.update(inner)
-                prop.pop("default", None)
-        if "manual" in schema.get("properties", {}):
-            schema["properties"]["manual"]["enum"] = manual_ids
-        specs.append({"type": "function", "function": {
-            "name": name, "description": (model.__doc__ or "").strip().replace("\n    ", ""), "parameters": schema}})
-    return specs
 
 
 # --------------------------------------------------------------------------- 结果
@@ -247,17 +178,20 @@ class Toolbox:
     seen 是本次对话已经给模型看过的片段（证据池），跨轮次累积：{chunk_id: {"distance": …, "shown": …}}。
     shown 记给模型看了多少：full 全文；head 长表格只给了开头（截断）；rows 只给了查表命中的几行。
     片段再次出现时，full 只给一行「前面已给出全文」，head 只给一行提示，rows 照常给正文。
+    abbreviate=False 时不做这种省略，重复出现的片段也给出正文：MCP 客户端自己管理上下文，
+    之前给过的全文可能已被压缩掉（见 src/s5_app/mcp_server.py）。
     """
 
-    def __init__(self, cfg: dict, tau: float, seen: dict[str, dict] | None = None):
+    def __init__(self, cfg: dict, tau: float, seen: dict[str, dict] | None = None, abbreviate: bool = True):
         self.cfg = cfg
         self.tau = tau
+        self.abbreviate = abbreviate
         self.corpus = get_corpus()
         self.seen: dict[str, dict] = {cid: dict(v) for cid, v in (seen or {}).items()}
 
     def fork(self) -> "Toolbox":
-        """副本：工具在副本上执行，按时完成才并回（agent._run_tool），超时还在跑的线程改不到证据池。"""
-        return Toolbox(self.cfg, self.tau, self.seen)
+        """副本：工具在副本上执行，按时完成才并回（run_tool），超时还在跑的线程改不到证据池。"""
+        return Toolbox(self.cfg, self.tau, self.seen, self.abbreviate)
 
     def merge(self, other: "Toolbox") -> None:
         self.seen.update(other.seen)
@@ -275,7 +209,7 @@ class Toolbox:
     def _show(self, cid: str, distance: float | None, new: list[dict]) -> str:
         c = self.corpus.by_id[cid]
         dist = "" if distance is None else f" · 距离 {distance:.3f}"
-        shown = (self.seen.get(cid) or {}).get("shown")
+        shown = (self.seen.get(cid) or {}).get("shown") if self.abbreviate else None
         if shown == "full":
             return f"[{cid}] {self.corpus.header(c)}{dist}（前面已给出全文）"
         if shown == "head":
@@ -433,4 +367,29 @@ class Toolbox:
             return getattr(self, name)(**parsed.model_dump())
         except ValueError as exc:      # 手册编号认不出等
             return _error(str(exc))
+
+
+# --------------------------------------------------------------------------- 执行器（Agent 与 MCP Server 共用）
+_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="tool")
+
+
+def run_tool(tb: Toolbox, name: str, args: dict, timeout_s: float) -> tuple[ToolResult, float]:
+    """执行一个工具调用，返回 (结果, 耗时 ms)。超时、意外异常都变成 ok=False 的结果（错误信息回给调用方），不抛出。
+
+    在工具箱的副本上执行，按时完成才把新给出的片段并回证据池：超时后工作线程停不下来、会接着跑完，
+    它改的只是副本，碰不到证据池，也不会和后面的调用同时改同一份数据。
+    """
+    t0 = time.perf_counter()
+    work = tb.fork()
+    fut = _POOL.submit(work.run, name, args)
+    try:
+        res = fut.result(timeout=timeout_s)
+    except FuturesTimeout:
+        res = ToolResult(False, f"工具调用失败：执行超过 {timeout_s:g} 秒仍未完成，已放弃。可以换个参数重试或直接作答。",
+                         f"超时（>{timeout_s:g} 秒）")
+    except Exception as exc:  # 工具内部的意外错误也作为结果返回，不中断调用方
+        res = ToolResult(False, f"工具调用失败：{type(exc).__name__}: {exc}", f"{type(exc).__name__}")
+    else:
+        tb.merge(work)
+    return res, round((time.perf_counter() - t0) * 1000, 1)
 
