@@ -23,7 +23,8 @@ for _p in ("src", "src/s3_eval", "src/s4_agent", "src/s5_app"):
 _PIPELINE_FILES = [
     "src/s5_app/api.py", "src/s4_agent/graph.py", "src/s4_agent/verify.py",
     "src/s3_eval/hybrid_retrieval.py", "src/llm_config.py",
-    "src/s4_agent/agent.py", "src/s4_agent/tools.py", "src/s4_agent/units.py", "src/s4_agent/tables.py",
+    "src/s4_agent/agent.py", "src/s4_agent/tools.py", "src/s4_agent/tool_schema.py", "src/s4_agent/units.py",
+    "src/s4_agent/tables.py", "src/s4_agent/numcheck.py",
 ]
 MODES = ("agent", "rag")
 
@@ -52,6 +53,9 @@ def system_info(corpus_fingerprint: str, mode: str) -> dict:
                 "max_tool_rounds": int(c["max_tool_rounds"]), "max_calls_per_round": int(c["max_calls_per_round"]),
                 "tool_timeout_s": float(c["tool_timeout_s"]), "lookup_max_rows": int(c["lookup_max_rows"]),
                 "history_turns": int(c["history_turns"]), "history_answer_chars": int(c["history_answer_chars"])}
+        if "max_repairs" in c:       # 阶段 3 的护栏参数（之前的评测没有这几项，指纹保持不变）
+            info.update({"injection_guard": bool(c["injection_guard"]), "max_repairs": int(c["max_repairs"]),
+                         "repair_prompt_sha1": _sha1(agent.REPAIR_PROMPT)[:12]})
     else:
         raise ValueError(f"未知模式：{mode}（可选 {MODES}）")
     info.update({"corpus": corpus_fingerprint, "code_sha1": code.hexdigest()[:12]})

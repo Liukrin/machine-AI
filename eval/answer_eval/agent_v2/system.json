@@ -1,0 +1,22 @@
+{
+ "mode": "agent",
+ "model": "deepseek-flash",
+ "temperature": 0.0,
+ "prompt_version": "agent",
+ "prompt_sha1": "59fa73851971",
+ "top_k": 5,
+ "max_tokens": 1024,
+ "tau_distance": 0.3567,
+ "max_tool_rounds": 3,
+ "max_calls_per_round": 4,
+ "tool_timeout_s": 10.0,
+ "lookup_max_rows": 12,
+ "history_turns": 3,
+ "history_answer_chars": 600,
+ "injection_guard": true,
+ "max_repairs": 1,
+ "repair_prompt_sha1": "a7feb27a0301",
+ "corpus": "0d8fe1ee02aeecde",
+ "code_sha1": "a9a70be64ed6",
+ "system_id": "df52a47aab9d"
+}

@@ -192,6 +192,16 @@ def aggregate(rows: list[dict]) -> dict:
             "cache_read_share": (sum(r.get("cache_read_tokens") or 0 for r in agent_rows),
                                  sum(r.get("input_tokens") or 0 for r in agent_rows)),
         }
+        checked = [r for r in agent_rows if r.get("sys_numbers_checked") is not None]
+        if checked:                       # 阶段 3 的数值核对与改写（之前的评测没有）
+            m["agent"]["numcheck"] = {
+                "n": len(checked),
+                "numbers": sum(r["sys_numbers_checked"] for r in checked),
+                "repairs": sum(1 for r in checked if r.get("repair")),
+                "repairs_fixed": sum(1 for r in checked if r.get("repair_fixed")),
+                "repairs_kept_draft": sum(1 for r in checked if r.get("repair") == "draft"),
+                "issue_answers": sum(1 for r in checked if r.get("sys_number_issues")),
+            }
     return m
 
 
@@ -398,6 +408,19 @@ def build_report(scores: list[dict], items: dict[str, dict], split: dict[str, st
                                                   for sp in splits) + " |")
         L += ["", "> 「期望的工具都用到了」只统计评测集里标了 tools 的题，只作参考、不计入对错："
               "答对的方式不止一种（比如查到的片段里已经同时写了两种单位，就不必再换算）。", ""]
+        if any("numcheck" in (aggs[sp].get("agent") or {}) for sp in splits):
+            L += ["### 数值核对与改写（系统自己的核对，见 src/s4_agent/numcheck.py）", "",
+                  "回答里的每个「数值 + 单位」要能在本次的资料（问题、工具返回的内容、换算/核对结果）里找到、单位一致；"
+                  f"对不上的交给模型改写一次（至多 {sysinfo.get('max_repairs')} 次），改得更差就退回初稿。"
+                  "下表是系统自己的核对结果，与上面评测的「数字可溯源」不是同一套代码。", "",
+                  "| 划分 | 题数 | 核对的数值 | 触发改写的题 | 改写后核对通过 | 退回初稿 | 最终仍有核对不上的数值的题 |",
+                  "|---|---|---|---|---|---|---|"]
+            for sp in splits:
+                nc = (aggs[sp].get("agent") or {}).get("numcheck")
+                if nc:
+                    L.append(f"| {sp} | {nc['n']} | {nc['numbers']} | {nc['repairs']} | {nc['repairs_fixed']} "
+                             f"| {nc['repairs_kept_draft']} | {nc['issue_answers']} |")
+            L.append("")
 
     # ---- 5. 评审自身的可靠性
     L += ["## 5. 评审模型的可靠性线索", "",

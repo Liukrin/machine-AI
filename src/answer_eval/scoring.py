@@ -128,6 +128,15 @@ def score(item: dict, record: dict, groups: list[list[str]], corpus: Corpus,
         "tools_expected": item.get("tools") or [],
         "tools_expected_ok": all(t in used for t in item.get("tools") or []),
     })
+    # 阶段 3 的数值核对与改写（系统自己的核对结果，之前的评测没有这些字段）
+    ver = record.get("verification") or {}
+    rep = ver.get("repair") or {}
+    s.update({
+        "sys_numbers_checked": ver.get("numbers_checked"),
+        "sys_number_issues": len(ver.get("number_issues") or []),
+        "repair": rep.get("kept"),                                    # None：没有改写；repaired / draft
+        "repair_fixed": bool(rep) and rep.get("issues_after") == 0,
+    })
 
     # 数值溯源：答案里的每个数，是否出现在本次检索到的片段、问句或换算/核对工具的输出里
     if answer:
