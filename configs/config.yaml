@@ -88,10 +88,12 @@ s3_rerank:
 prompts:
   A: configs/prompts/A_no_citation.txt            # 无引用标注要求（对照组）
   B: configs/prompts/B_end_citation.txt           # 答案末尾标注引用（切换前的线上版本）
-  C: configs/prompts/C_per_sentence_citation.txt  # 每一句末尾标注引用（现线上版本）
+  C: configs/prompts/C_per_sentence_citation.txt  # 每一句末尾标注引用（rag 模式在用的版本）
+  agent: configs/prompts/agent.txt                # 工具调用 Agent 的系统提示词（{catalog} 处填手册清单）
 
 s4_agent:
-  # 线上问答参数（graph.py 与 api.py 共用）
+  # rag 模式（固定流水线：检索 → 拒答闸 → 生成 → 引用校验）的参数，graph.py 与 api.py 共用；
+  # 这是阶段 1 答案级评测的基线系统。tau_distance 也被 agent 模式用来标注「检索相关度低」。
   system_prompt: C   # prompts 段的版本 key
   top_k: 5           # 送入 LLM 的检索片段数（检索选型评测用 top_k=10，见 s3_retrieval）
   # 单次回答生成上限（原 500）。经 extra_body 以 max_tokens 字段发给 DeepSeek：langchain-openai 1.x 会把
@@ -104,6 +106,30 @@ s4_agent:
   # 注意：36 条正样本就是 eval/qa_set.jsonl 本身，在同一批题上取 P95，线性插值下必然恰有 2 题（qa_002、qa_018）高于阈值；
   # 5.6% 的误拒率由阈值定义决定，不是独立测试集上测得的结果。
   tau_distance: 0.3567
+
+agent:
+  # 工具调用 Agent（src/s4_agent/agent.py，LangGraph 图：预检索 → 模型 ⇄ 工具 → 引用校验）。
+  # /api/ask 默认走这里；请求里 mode=rag 时走上面 s4_agent 段的固定流水线。
+  default_mode: agent        # 请求不指定 mode 时用哪种：agent | rag
+  system_prompt: agent       # prompts 段的版本 key
+  max_tokens: 1024           # 单次模型调用的生成上限（与 rag 模式相同）
+  max_tool_rounds: 3         # 模型最多发起几轮工具调用，之后强制作答：每题最多 4 次模型调用
+  max_calls_per_round: 4     # 一轮里最多执行几个工具调用，多出的不执行、作为错误回给模型
+  tool_timeout_s: 10         # 单个工具的超时（秒），超时作为错误回给模型
+  search_top_k: 5            # search_manuals 每次返回的片段数（与 rag 模式的 top_k 相同）
+  lookup_max_rows: 12        # lookup_table 最多列出的命中行数
+  history_turns: 3           # 带上最近几轮对话（一问一答算一轮）
+  history_answer_chars: 600  # 每条历史回答去掉引用标记后最多保留的字数
+  # 拒答判定：回答含这些话术且没有引用任何片段（与答案级评测、前端同一口径）
+  refusal_markers: [检索内容不足, 知识库无相关内容, 无法回答, 未能找到相关]
+
+# 单题成本估算用的模型单价（元/百万 tokens）。DeepSeek 官网 2026-09-30 的价格：
+# config 里的模型名 deepseek-chat 是旧别名，接口返回的 model 字段为 deepseek-flash（V4.1-Flash），按 Flash 价格估算；
+# 取高峰时段价格作为上限（空闲时段为一半）。https://api-docs.deepseek.com/zh-cn/quick_start/pricing
+llm_pricing:
+  input_cache_hit: 0.04
+  input_cache_miss: 2.0
+  output: 8.0
 
 s5_app:
   # 允许跨域的前端地址（开发时前端走 Vite 代理、同源访问，用不到；直接从其他端口访问 API 时才需要）
@@ -218,6 +244,12 @@ answer_eval:
   split: eval/answer_set_split.json    # dev / test 划分（validate.py --assign 生成后冻结）
   out_dir: eval/answer_eval            # 每次评测一个子目录：<out_dir>/<评测名>/
   run: baseline                        # 默认评测名；系统改动后用 --run 换名另存，便于前后对比
+  # 其他评测集（run.py / validate.py 用 --set 选择），结果放在 <out_dir>/<评测名>/<集名>/
+  sets:
+    tasks:
+      title: Agent 多步任务集
+      items: eval/agent_tasks.yaml       # 单位换算、限值核对、表格精确查询、多步/跨手册，外加手册没写的参数
+      split: eval/agent_tasks_split.json
 
   # 模型自述拒答的话术（与前端、s4_halluc_ab 同一组）。判定：命中话术且答案里没有引用任何片段。
   refusal_markers:

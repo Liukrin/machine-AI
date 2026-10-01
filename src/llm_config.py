@@ -23,8 +23,11 @@ def max_tokens_body(max_tokens: int) -> dict:
     return {"extra_body": {"max_tokens": max_tokens}}
 
 
-def get_llm(max_tokens: int | None = None):
-    """Return a configured ChatOpenAI instance（max_tokens 为生成上限，None 则用服务端默认值）。"""
+def get_llm(max_tokens: int | None = None, stream_usage: bool = False):
+    """Return a configured ChatOpenAI instance（max_tokens 为生成上限，None 则用服务端默认值）。
+
+    stream_usage=True 时流式调用也返回 token 用量（Agent 在 LangGraph 里流式调用模型时需要）。
+    """
     if not LLM_CONFIG["api_key"]:
         raise RuntimeError(
             "DEEPSEEK_API_KEY not set. Add your key to .env, then restart."
@@ -34,5 +37,6 @@ def get_llm(max_tokens: int | None = None):
         model=LLM_CONFIG["model"],
         api_key=LLM_CONFIG["api_key"],
         temperature=LLM_CONFIG["temperature"],
+        **({"stream_usage": True} if stream_usage else {}),
         **(max_tokens_body(max_tokens) if max_tokens is not None else {}),
     )
