@@ -1,27 +1,28 @@
 # 机械设备运维知识问答 RAG 平台
 
-面向泵类设备维修手册的检索增强生成（RAG）问答系统：PDF 手册 → 解析切分 → 向量/BM25 混合检索 → 固定流水线（retrieve → 拒答闸 → generate → verify）→ 流式问答，每句回答标注出处，点开可核对手册原文。embedding 模型本地离线加载，生成调用 DeepSeek API；仅在开发环境验证。
+面向泵类设备维修手册的检索增强生成（RAG）问答系统：PDF 手册 → 解析切分 → 向量/BM25 混合检索 → LangGraph 工具调用 Agent（检索、按行查表、读相邻片段、单位换算、限值核对）→ 流式问答。每句回答标注出处，点开可核对手册原文；单位换算和「实测值是否超出手册限值」由确定性代码计算，不交给模型。阶段 1 的固定流水线（retrieve → 拒答闸 → generate → verify）保留为 rag 模式，作为对照基线。embedding 模型本地离线加载，生成调用 DeepSeek API；仅在开发环境验证。
 
 ## 关键结果
 
 > 指标均可在 `eval/` 下复现，复现命令见「复现评测」。
 
+- **工具调用 Agent**（阶段 2）：API 直接执行 LangGraph 图并流式推送每一步。在答案级评测的 test 集上，应作答的题完全答对 43/59 → 58/59，误拒 14 → 0，多轮追问 0/5 → 5/5；在新建的 31 题多步任务集（单位换算、限值核对、表格精确查询、跨手册）上，test 5/13 → 13/13，数值事实 12/21 → 21/21。代价是单题成本约 4.5–6.4 倍，多步任务慢约 1.8 秒；库外题按规则的拒答召回 dev 从 15/15 降到 13/15（漏掉的两题回答其实都以「知识库无相关内容」开头，只是带了引用）（[设计与评测](docs/agent.md)）
 - **混合检索选型**：36 题评测集上，BM25 + 向量 RRF 融合相比纯向量 Recall@1 0.583 → 0.778、MRR@10 0.720 → 0.836；线上取前 5 条，对应 Recall@5 0.861 → 0.889（[s3_summary](eval/reports/s3_summary.md)）
-- **逐句引用标注**：同一份检索结果下只改提示词里的引用条款，无引用句占比 A 1.000 → B 0.732 → C 0.063，拒答率没有上升；C 组已上线。这个指标衡量的是「每句话有没有标出处」，不衡量出处是否真的支持这句话（[halluc_ab](eval/halluc_ab/summary.md)）
+- **逐句引用标注**：同一份检索结果下只改提示词里的引用条款，无引用句占比 A 1.000 → B 0.732 → C 0.063，拒答率没有上升；C 组用在 rag 模式。这个指标衡量的是「每句话有没有标出处」，不衡量出处是否真的支持这句话（[halluc_ab](eval/halluc_ab/summary.md)）
 - **端到端耗时构成**：正常问答端到端均值 2724 ms，其中 LLM 生成占 99.2%，本地计算（混合检索、逐块距离、拒答闸）合计 22 ms；优化空间在生成侧（首 token P50 1666 ms）（[s5_perf](eval/reports/s5_perf.md)）
-- **答案级评测基线**：150 题（带参考答案、关键事实，dev/test 划分）。测试集上应作答的 59 题完全答对 43 题（0.729），数值事实答对 32/35，应拒答的 14 题拒掉 13 题；只要证据被检索到且系统作答，就全部答对（43/43）——失分来自拒答闸误拒和检索未召回，不是生成（[方法与结果](docs/answer_eval.md)）
+- **答案级评测基线**（阶段 1，rag 模式）：150 题（带参考答案、关键事实，dev/test 划分）。测试集上应作答的 59 题完全答对 43 题（0.729），数值事实答对 32/35，应拒答的 14 题拒掉 13 题；只要证据被检索到且系统作答，就全部答对（43/43）——失分来自拒答闸误拒和检索未召回，不是生成。这个结论直接决定了阶段 2 先改什么（[方法与结果](docs/answer_eval.md)）
 
 ## 演示
 
 <p align="center">
-  <img src="docs/assets/demo-qa.png" alt="问答主界面：参考来源卡片、逐句引用角标与引用校验" width="760">
+  <img src="docs/assets/demo-agent.png" alt="Agent 模式：查阅过程时间线（预检索、单位换算、限值核对）、参考来源卡片、逐句引用角标与追问" width="760">
 </p>
 
-| 点击引用角标查看原文（表格按原结构还原） | 库外问题被拒答闸拦截，不调用大模型 |
+> Agent 模式的一次提问：上方「查阅过程」实时显示每一步——系统先用原问题检索一次（标「自动」），模型再按需调用工具（这里是把 185 °F 换算成 °C、把实测值和手册限值交给代码核对，结论「超出上限」由代码给出）；随后流式输出回答，每句末尾的 chunk_id 渲染成可点击的角标；最后给出引用校验结果、模型调用次数、token 与耗时。下一轮的追问「那下限是多少？」带着上文一起发给后端。回答被生成长度上限截断时会显式提示。
+
+| 点击引用角标查看原文（表格按原结构还原） | 直接检索（rag）模式：库外问题被拒答闸拦截，不调用大模型 |
 |---|---|
 | <img src="docs/assets/demo-source.png" alt="来源详情：手册名、页码、相似度与原始表格" width="380"> | <img src="docs/assets/demo-reject.png" alt="拒答：最相近片段的向量距离高于阈值" width="380"> |
-
-> 一次提问的过程：先推送检索到的手册片段（手册名、章节、页码），再流式输出回答；回答里每句末尾的 chunk_id 渲染成可点击的角标，点开即可核对原文；最后给出引用校验结果与 token / 耗时。回答被生成长度上限截断时会显式提示。
 
 ## 使用场景
 
@@ -31,25 +32,29 @@
 
 - 「防爆泵安装需遵守哪些指导原则？」→ 返回正文段落
 - 「出水管径125时轴封水量是多少？」→ 返回表格中的对应行（0.20 m³/h）
-- 「如何配置 Nginx 反向代理？」→ 被拒答闸拦截（最相近片段的向量距离 0.4334 > 阈值 0.3567），不调用大模型
+- 「Model 3700 轴承温度实测 185°F，在手册要求的范围内吗？」→ 查到手册的轴承温度范围（49–82 °C | 120–180 °F）后，换算工具算出 85 °C，核对工具判定「超出上限 5 °F」，回答按这个结论表述
+- 接着问「那下限是多少？」→ 结合上文回答 49 °C | 120 °F
+- 「空压机的排气温度一般不能超过多少度？」→ 说明知识库收录的是泵类等设备手册、查过之后没有相关内容
 
-知识库覆盖 7 个文档：4 份公开泵类手册 + 3 份自造样例手册（见「数据来源」）。拒答闸只能拦住与手册差得远的问题；「挖掘机液压泵压力多少正常？」这类语义相邻的库外问题（距离 0.3452）会穿过拒答闸，只能靠提示词要求模型回答「检索内容不足」来兜底，不保证每次都拒答（见「已知局限」）。
+知识库覆盖 7 个文档：4 份公开泵类手册 + 3 份自造样例手册（见「数据来源」）。前端可以切到「直接检索」（rag 模式）对照：那里由一个向量距离阈值决定拒不拒答，「如何配置 Nginx 反向代理？」（距离 0.4334 > 0.3567）不调用大模型就被拦下，但「挖掘机液压泵压力多少正常？」这类语义相邻的库外问题（距离 0.3452）会穿过阈值（见「已知局限」）。
 
 ## 架构
 
-> 五阶段数据流与拒答短路机制。
+> 五阶段数据流；问答默认走工具调用 Agent，固定流水线保留为对照。
 
 ```mermaid
 flowchart LR
     A["S1 解析<br/>MinerU 解析 7 份 PDF（4 真实 + 3 样例）<br/>→ blocks.jsonl"] --> B["S2 切分 + 索引<br/>清洗合并 457 chunk<br/>bge-small-zh 向量 + Chroma<br/>BM25 索引"]
-    B --> C["S3 混合检索<br/>BM25 + 向量 RRF 融合<br/>线上取 top 5"]
-    C --> D["S4 问答流水线<br/>retrieve → 拒答闸 → generate<br/>→ verify → format<br/>引用校验"]
+    B --> C["S3 混合检索<br/>BM25 + 向量 RRF 融合<br/>每次取 top 5"]
+    C --> D["S4 工具调用 Agent<br/>预检索 → 模型 ⇄ 工具 → 引用校验<br/>（rag 模式：检索 → 拒答闸 → 生成）"]
     D --> E["S5 前后端<br/>FastAPI SSE 流式<br/>Vite + React 前端"]
 ```
 
-- **拒答闸**：检索完成后取向量 top-1 distance 与阈值 τ=0.3567 比较，超阈值直接返回「知识库无相关内容」，跳过生成与校验，不调用 LLM。
-- **流水线实现**：[`src/s4_agent/graph.py`](src/s4_agent/graph.py) 用 LangGraph 定义了上面的流水线，命令行入口运行的是这张图；API（[`src/s5_app/api.py`](src/s5_app/api.py)）复用同一组节点函数和参数，但为了逐 token 推送，生成段改写成了流式调用，没有直接执行编译后的图。整条链路是固定流水线：没有工具调用，也不做多轮对话。
-- **参数集中在 config**：线上用的提示词版本、检索条数、生成上限、拒答阈值都在 [`configs/config.yaml`](configs/config.yaml) 的 `s4_agent` 段；三版提示词存在 [`configs/prompts/`](configs/prompts/)，评测脚本读的是同一批文件。
+- **Agent 图**（[`src/s4_agent/agent.py`](src/s4_agent/agent.py)）：系统先用原问题检索一次（有对话历史时拼上上一问）；模型读结果后直接作答，或调用工具继续查——`search_manuals`（可限定手册、正文/表格）、`lookup_table`（表格按行入库到内存 SQLite，按关键词查行）、`read_section`（读相邻片段）、`convert_unit`（换算）、`check_value`（实测值与手册限值比较）。工具轮数上限 3、单个工具超时 10 秒，工具出错作为观察结果回给模型；最后做引用校验。实测主集 dev 67/77、test 62/73 的题看完预检索结果就作答，只调一次模型。
+- **API 直接执行这张图**：[`src/s5_app/api.py`](src/s5_app/api.py) 用 `graph.stream(stream_mode=["messages", "custom", "values"])` 同时推送模型逐 token 输出、每个工具调用的开始/结束和最终状态；`/api/ask` 接受对话历史（最近 3 轮）。
+- **确定性的部分**：单位换算的系数取定义值；「是否超限」由代码比较，且限值必须出自本次检索到的片段、数字要能在原文里找到；Agent 没有向量距离闸，距离只用来提示模型「相关度低」。
+- **rag 模式**（请求里 `mode=rag`，前端「直接检索」）：阶段 1 的固定流水线，检索后取向量 top-1 distance 与 τ=0.3567 比较，超阈值直接返回「知识库无相关内容」、不调用 LLM，否则生成一次（[`src/s4_agent/graph.py`](src/s4_agent/graph.py)）。
+- **参数集中在 config**：两种模式的提示词版本、检索条数、生成上限、Agent 的轮数与超时、对话历史长度都在 [`configs/config.yaml`](configs/config.yaml)（`s4_agent`、`agent` 段）；提示词存在 [`configs/prompts/`](configs/prompts/)，评测脚本读的是同一批文件。设计细节与取舍见 [docs/agent.md](docs/agent.md)。
 
 ## 核心数据
 
@@ -80,7 +85,7 @@ flowchart LR
 |---|---|---|
 | A | 无引用标注要求（对照组） | [`configs/prompts/A_no_citation.txt`](configs/prompts/A_no_citation.txt) |
 | B | 「答案末尾必须标注引用的 chunk_id」（切换前的线上版本） | [`configs/prompts/B_end_citation.txt`](configs/prompts/B_end_citation.txt) |
-| C | 「答案每一句末尾必须标注所引用的 chunk_id」（现线上版本） | [`configs/prompts/C_per_sentence_citation.txt`](configs/prompts/C_per_sentence_citation.txt) |
+| C | 「答案每一句末尾必须标注所引用的 chunk_id」（rag 模式现用版本） | [`configs/prompts/C_per_sentence_citation.txt`](configs/prompts/C_per_sentence_citation.txt) |
 
 三组共用同一份落盘检索缓存（36 题，top_k=5），保证检索输入完全一致，只换系统提示词；评测脚本在运行时自检三个文件确实只差这一行。
 
@@ -100,7 +105,7 @@ flowchart LR
 - **拒答率是控制变量**：若某组「引用率改善」是靠少答换来的，拒答率应同步上升。实测三组为 0.083 / 0.083 / 0.056——B 与 A 持平，C 比 A 低 2.8 个百分点，改善不来自「少答」。
 - **这个指标不说明什么**：A 组没被要求标引用，得 1.000 是必然的；B → C 的下降本质上是指令遵循率的变化。句子带了 `[chunk_id]` 不代表那个片段真的支持这句话，也不代表答案正确——那需要答案级评测（参考答案、关键事实与数值核对），目前还没有。
 
-线上用哪一版由 `configs/config.yaml` 的 `s4_agent.system_prompt` 决定，现为 C。
+rag 模式用哪一版由 `configs/config.yaml` 的 `s4_agent.system_prompt` 决定，现为 C；Agent 模式的提示词沿用 C 组的逐句标注要求，另加了工具使用和拒答规则（[`configs/prompts/agent.txt`](configs/prompts/agent.txt)）。
 
 ## 答案级评测
 
@@ -108,7 +113,9 @@ flowchart LR
 
 **评测集**（[`eval/answer_set.yaml`](eval/answer_set.yaml)）：150 题，121 题应作答（正文事实、步骤、表格、跨片段、口语化、多轮追问），29 题应拒答（相近领域、手册未写、无关问题）。每题有参考答案、关键事实和证据引文，经脚本校验数值出自手册原文；dev 77 题用于调试和迭代，test 73 题只用来报数。评测直接驱动线上接口背后的事件生成器，与线上同一条代码路径。
 
-**基线**（C 组提示词、top_k=5、τ=0.3567；方括号为 95% 置信区间）：
+### 阶段 1：基线（rag 模式）
+
+C 组提示词、top_k=5、τ=0.3567；方括号为 95% 置信区间：
 
 | | dev | test |
 |---|---|---|
@@ -128,9 +135,34 @@ flowchart LR
 - **多轮追问不可用。** 10 道追问全部被拒答闸拦截；改写成独立问题后能答对 7 道。
 - **错误的形态是「张冠李戴」，不是编造。** 答案句子与检索片段的字面重合度中位数 0.84–0.87，基本在摘抄原文。test 里漏拒的那道题，是用泵手册的换油周期回答了「减速机齿轮箱多久换油」。
 
+### 阶段 2：工具调用 Agent
+
+同一个模型，按上面的失分逐项改（去掉距离闸、带对话历史、检索不够时由模型换说法或按行查表）。另建了 31 题的 [Agent 多步任务集](eval/agent_tasks.yaml)：单位换算、限值核对、表格精确查询、跨手册，外加 3 道手册没写的参数；换算结果用独立写出的算式核对。任务集在写 Agent 之前定稿，并先用阶段 1 的系统生成了基线答案。Agent 在 dev 上跑一次（只修了评测脚本自己的两处问题，没有改系统），test 只跑一次。
+
+| | 主集 test：基线 → Agent | 任务集 test：基线 → Agent |
+|---|---|---|
+| 应作答的题：完全答对 | 43/59 [0.60, 0.83] → **58/59 [0.91, 1.00]** | 5/13 [0.18, 0.64] → **13/13 [0.77, 1.00]** |
+| 误拒 | 14 → 0 | 3 → 0 |
+| 数值事实答对 | 32/35 → 35/35 | 12/21 → 21/21 |
+| 多轮追问 / 单位换算题 | 多轮 0/5 → 5/5 | 换算 0/4 → 4/4 |
+| 应拒答的题：按规则被拒 | 13/14 → 13/14 | 1/1 → 1/1 |
+| 忠实度·严格 | 0.973 → 0.946 | 0.889 → 0.917 |
+| 无引用句占比 | 0.014 → 0.373 | 0.211 → 0.286 |
+| 作答耗时 P50（ms） | 2052 → 1989 | 2390 → 4134 |
+| 单题成本（元，输入全按未命中计） | 0.0017 → 0.0085 | 0.0022 → 0.0143 |
+
+dev 上的结果方向一致（主集 49/62 → 62/62，任务集 9/15 → 15/15），完整对比见 [compare_baseline_vs_agent_v1.md](eval/answer_eval/compare_baseline_vs_agent_v1.md) 与 [任务集对比](eval/answer_eval/compare_baseline_vs_agent_v1_tasks.md)。几点读法（详见 [docs/agent.md](docs/agent.md)）：
+
+- **提升对应阶段 1 找出的三类失分**：误拒归零、追问带上历史后 10/10 答对、换算与核对交给确定性工具后数值事实全对。
+- **拒答召回按规则下降**（dev 15/15 → 13/15）：被记为作答的应拒答题（两个集合 dev+test 共 4 题），回答都以「知识库无相关内容」开头、说明查到的内容为何不适用，只是违反提示词带上了片段编号；规则没有在看到结果后修改。
+- **无引用句明显增多**：主要是 Markdown 表格行（表格只在开头或结尾标一次出处，test 85 句里 51 句）；引用粒度要在下一步的校验器里定。
+- **代价**：输入 token 约 3.5–5.6 倍、成本约 4.5–6.4 倍；多步任务平均 1.9 次模型调用，慢约 1.8 秒。
+
 ```bash
-python src/answer_eval/run.py            # 全量评测；加 --split dev 只看开发集，--reuse 用缓存零调用重算
-python src/answer_eval/run.py --run v2   # 系统改动后换个名字另存，与 baseline 对比
+python src/answer_eval/run.py --run agent_v1                 # 主评测集（默认 agent 模式）；--split dev 只看开发集
+python src/answer_eval/run.py --run agent_v1 --set tasks     # Agent 多步任务集
+python src/answer_eval/run.py --run baseline --reuse         # rag 基线：用缓存零调用重算
+python src/answer_eval/compare.py baseline agent_v1          # 两次评测并排对比
 ```
 
 ## 关键取舍
@@ -143,7 +175,13 @@ python src/answer_eval/run.py --run v2   # 系统改动后换个名字另存，�
 
 3. **拒答阈值重叠**。τ=0.3567 取自评测集 36 题向量 top-1 distance 的 P95，而负样本「挖掘机液压泵」distance 0.3347 已穿过阈值：语义邻近查询与正样本没有清晰间隔，单一距离闸挡不住。另外，τ 就是在这 36 题上标定的，线性插值下必然恰有 2 题（qa_002、qa_018）高于阈值，所以 2/36 的误拒是阈值定义决定的，不是在独立测试集上测出的误拒率；后来在答案级评测的新题上独立测得，单轮问题被闸误拒 dev 4/57、test 5/54。
 
-4. **样例数据暂留在库**。457 chunk 中有 18 条来自 S1 阶段自造的样例手册；评测集 36 题全部抽自真实手册 doc 1–4，检索指标不受影响，前端来源卡片会把样例手册标为「示例」。清理需要改 `data/` 并重跑评测，尚未进行。另有一个 token 异常单例：qa_031 同时召回 5 个大表格 chunk，输入约 1 万 token，约为正常值 10 倍，已记录在 [`docs/badcase.md`](docs/badcase.md) 案例 9。
+4. **去掉向量距离闸，改由模型判断证据够不够**（阶段 2）。阶段 1 的闸在新评测集上拦下了 16 道证据其实已检索到的题（其中 8 道是追问；10 道追问全部被拦）；而库外题里有 12/29 本来就穿过了闸，靠模型自己拒答。Agent 里距离仍然算、仍然告诉模型「相关度低」，但不再替它做决定。代价是库外题全靠模型拒答：按规则 dev 15/15 → 13/15（漏掉的两题实际是带了引用的拒答）。
+
+5. **第一次检索由代码做**（阶段 2）。第一次查询几乎总是用户原话，交给模型决定要多花一次模型调用（约 1–2 秒）；预检索结果以一次工具调用的形式放进对话，模型觉得不够再自己查。主集约 85% 的题一次模型调用就答完，延迟与 rag 模式没有稳定差异（作答耗时 P50：test 1989 vs 2052 ms，dev 2336 vs 1795 ms，两次运行时段不同）。
+
+6. **物理阈值判决交给代码**（阶段 2）。「78℃ 是否超过手册规定」这类判断由 `check_value` 比较得出，模型只负责找到限值并把参数交给它；限值必须出自本次检索到的片段、数字要能在原文里找到，防止模型编一个限值来比。换算同理不让模型心算。开发中出现过一次反例：换算工具不认识 daN·m 时，模型改用 kgf·m 重试，算出了错误的结果——工具只保证「把被要求的算对」，参数仍要校验（[process_log](docs/process_log.md) 第 15 条）。
+
+7. **样例数据暂留在库**。457 chunk 中有 18 条来自 S1 阶段自造的样例手册；评测集 36 题全部抽自真实手册 doc 1–4，检索指标不受影响，前端来源卡片会把样例手册标为「示例」。清理需要改 `data/` 并重跑评测，尚未进行。另有一个 token 异常单例：qa_031 同时召回 5 个大表格 chunk，输入约 1 万 token，约为正常值 10 倍，已记录在 [`docs/badcase.md`](docs/badcase.md) 案例 9。
 
 ## 快速启动
 
@@ -198,7 +236,7 @@ npm install
 npm run dev
 ```
 
-接口：`GET /api/health`（健康检查与文档清单）、`POST /api/ask`（SSE 流式问答）、`GET /api/chunks/{chunk_id}`（片段原文）。
+接口：`GET /api/health`（健康检查、文档清单、默认模式）、`POST /api/ask`（SSE 流式问答，请求体 `{question, history?, mode?}`，`mode` 为 `agent`（默认）或 `rag`，事件格式见 [docs/agent.md](docs/agent.md) 第 4 节）、`GET /api/chunks/{chunk_id}`（片段原文）。命令行试问 Agent：`python src/s4_agent/agent.py "问题"`。
 
 ### 复现评测
 
@@ -209,7 +247,10 @@ npm run dev
 | [s3_rerank](eval/reports/s3_rerank.md) 混合 + rerank | `python src/s3_eval/rerank_retrieval.py` | 否 |
 | [halluc_ab](eval/halluc_ab/summary.md) 引用标注对照 | `python src/s4_eval/halluc_ab_eval.py`（加 `--reuse-answers` 用已落盘答案零调用复算） | 是 |
 | [s5_perf](eval/reports/s5_perf.md) 端到端性能 | `python src/s5_eval/perf_bench.py` | 是 |
-| [answer_eval](eval/answer_eval/baseline/report.md) 答案级评测 | `python src/answer_eval/run.py`（加 `--reuse` 用已落盘的答案与评审结果零调用重算） | 是 |
+| [answer_eval 基线](eval/answer_eval/baseline/report.md) 答案级评测（rag 模式） | `python src/answer_eval/run.py --run baseline --reuse`（流水线代码已改，只能用缓存复算） | 否（用缓存） |
+| [answer_eval Agent](eval/answer_eval/agent_v1/report.md) 答案级评测（agent 模式） | `python src/answer_eval/run.py --run agent_v1`（加 `--reuse` 用已落盘的答案与评审结果零调用重算） | 是 |
+| [Agent 多步任务集](eval/answer_eval/agent_v1/tasks/report.md)（另有[基线](eval/answer_eval/baseline/tasks/report.md)） | `python src/answer_eval/run.py --run agent_v1 --set tasks` | 是 |
+| [两次评测对比](eval/answer_eval/compare_baseline_vs_agent_v1.md) | `python src/answer_eval/compare.py baseline agent_v1 [--set tasks]` | 否 |
 | [judge_probe](eval/answer_eval/baseline/judge_probe.md) 评审灵敏度测试 | `python src/answer_eval/probe.py` | 是 |
 
 ## 目录结构
@@ -220,7 +261,7 @@ npm run dev
 .
 ├── configs/
 │   ├── config.yaml            # 所有路径与参数（脚本内不硬编码）
-│   └── prompts/               # 系统提示词 A/B/C 三个版本
+│   └── prompts/               # 系统提示词：rag 模式 A/B/C 三个版本、Agent、评审模型
 ├── scripts/build_index.py     # 一键重建知识库（S1 解析 → S2 索引）
 ├── data/                      # 不入仓库
 │   ├── raw_pdf/               # 7 份 PDF：4 份真实手册（1.pdf–4.pdf）+ 3 份自造样例（sample_*）
@@ -231,14 +272,16 @@ npm run dev
 ├── eval/
 │   ├── qa_set.jsonl           # 36 题检索评测集（只标了证据片段）
 │   ├── answer_set.yaml        # 150 题答案级评测集（参考答案、关键事实、证据引文）+ answer_set_split.json
-│   ├── answer_eval/           # 答案级评测产物，每次评测一个子目录（baseline/…）
+│   ├── agent_tasks.yaml       # 31 题 Agent 多步任务集（换算、限值核对、按行查表、跨手册）+ agent_tasks_split.json
+│   ├── answer_eval/           # 答案级评测产物，每次评测一个子目录（baseline/、agent_v1/，任务集在其下 tasks/）
 │   ├── reports/               # s1_qc / s3_baseline / s3_hybrid / s3_rerank / s3_summary / s5_perf
 │   └── halluc_ab/             # 引用标注 A/B/C 三组对照实验产物
 ├── src/
 │   ├── s1_ingest/             # MinerU 解析 → 结构化 → 质检
 │   ├── s2_index/              # 清洗 → 合并 chunk → 向量化 → BM25
 │   ├── s3_eval/               # 评测集构建 + 混合检索（线上检索也在这里）+ rerank 对照
-│   ├── s4_agent/              # LangGraph 问答流水线 + 引用校验
+│   ├── s4_agent/              # agent.py 工具调用图、tools.py 五个工具、units.py 换算与限值比较、
+│   │                          # tables.py 表格按行入库；graph.py 固定流水线（rag 模式）；verify.py 引用校验
 │   ├── s4_eval/               # 引用标注对照评测脚本
 │   ├── s5_app/                # FastAPI 后端（SSE）
 │   ├── s5_eval/               # 端到端性能基准脚本
@@ -246,7 +289,8 @@ npm run dev
 │   └── llm_config.py          # DeepSeek 配置
 ├── frontend/                  # Vite + React + TS + Tailwind 前端
 ├── docs/
-│   ├── answer_eval.md         # 答案级评测的方法与基线结果
+│   ├── agent.md               # 工具调用 Agent 的设计、取舍与评测结果
+│   ├── answer_eval.md         # 答案级评测的方法与结果
 │   ├── process_log.md         # 开发过程与失败记录
 │   └── badcase.md             # 已知缺陷与边界分析
 ├── CLAUDE.md                  # 项目施工手册
@@ -273,12 +317,13 @@ npm run dev
 
 > 未解决的问题与适用边界，诚实列出而非回避。
 
-- **拒答闸只有一个距离阈值，两头都出错**：该答的题被它拦掉（答案级评测 test：单轮问题 5/54 被误拒，证据其实已经检索到）；语义相邻的库外问题又会穿过它（29 道应拒答的题有 12 道距离低于 τ），只能靠模型自述「检索内容不足」兜底，test 上漏了 1 道
-- **不支持多轮**：没有工具调用；前端的对话历史只用于展示，每个问题独立检索。评测里 10 道追问全部被拒答闸拦截
-- **会把内容安到错的对象上**：问减速机换油，用泵手册的换油周期作答；问 D 型泵，用 Wilo 手册的内容作答。句子相对检索片段「有依据」，现有的引用校验和忠实度评审都发现不了
-- **引用校验抓不到数值错误**：校验器只检查 chunk_id 是否来自本次检索结果，以及句子的汉字二元组与检索文本的重合度；数字和单位不参与比对，把「允差 0.1 毫米」改成「5 毫米」不会被标为可疑。句号后面不带括号的引用也会被它当成「无引用」
-- **D 型泵手册检索偏弱**（test 完全答对 5/9）：它的片段文本不带手册名，问「D型泵…」时常检索到别的手册
-- **大表格处理粗糙**：表格被拍平成「表头 + 全部单元格」文本后用于检索和生成，行列结构丢失；22 个表格 chunk 超过 embedding 模型 512 token 上限（最长 4464 token），向量化时被截断；表格题 test 完全答对 9/14
-- **评测自身的局限**：答案级评测集由 AI 编写、脚本校验，未经人工逐条复核；评审模型与生成模型相同，人工校准样本已导出但尚未标注；每个划分约 60 道应答题，置信区间宽
+- **库外题全靠模型拒答**（agent 模式）：没有了距离闸，「知识库无相关内容」由模型自己判断。评测里有 4 道应拒答题，Agent 的回答虽以拒答话术开头、说明查到的内容不适用，却违反提示词带上了片段编号，按规则记为作答，前端也会把它当成普通回答展示
+- **引用粒度变粗**：Agent 爱用 Markdown 表格和列表，引用常只标在表头或小标题上，逐句口径下无引用句占比 dev 0.354、test 0.373（rag 模式 0.059、0.014），其中过半是表格行
+- **引用校验抓不到数值错误**：校验器只检查 chunk_id 是否来自本次工具返回的片段，以及句子的汉字二元组与片段（和换算/核对结果）的重合度；答案里的数字不逐个比对，把「允差 0.1 毫米」改成「5 毫米」不会被标为可疑。换算与限值核对本身是确定性的，但交给工具的参数（例如单位）仍可能被模型写错
+- **多轮只做了最基本的一层**：带最近 3 轮问答、追问由模型结合上文改写后检索；没有历史摘要、上下文预算和跨会话记忆，历史只存在浏览器本地
+- **成本与延迟**：Agent 的输入 token 是 rag 模式的 3.5–5.6 倍，单题成本 4.5–6.4 倍；需要调工具的多步任务平均 1.9 次模型调用，比 rag 模式慢约 1.8 秒。进程内第一次请求要加载 embedding 模型（约 0.6 秒），尚未在启动时预加载
+- **大表格的向量化仍被截断**：22 个表格 chunk 超过 embedding 模型 512 token 上限（最长 4464 token）；Agent 通过按行查表绕开了一部分（表格题 test 9/14 → 14/14），检索本身没有改
+- **rag 模式的问题仍在**：一个距离阈值两头出错（该答的被拦、语义相邻的库外题穿过），不看对话历史；保留它只作对照
+- **评测自身的局限**：两个答案级评测集都由 AI 编写、脚本校验，未经人工逐条复核；评审模型与生成模型相同，人工校准样本已导出但尚未标注；每个划分约 60 道应答题（任务集约 15 道），置信区间宽；模型名 `deepseek-chat` 是 DeepSeek 已公告停用的旧别名，目前由 deepseek-flash（V4.1-Flash）非思考模式提供服务
 - **仅本地离线开发环境验证**：未做并发压测与生产部署，SSE 流式在高并发下的稳定性未知
 - **知识库仅覆盖泵类设备**：4 份真实手册 + 3 份样例，跨品类泛化能力未验证
