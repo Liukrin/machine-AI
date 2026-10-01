@@ -183,6 +183,7 @@ python src/answer_eval/run.py --run agent_v2       # 系统改动后另存一份
 python src/answer_eval/run.py --mode rag           # 评 rag 模式（阶段 1 的固定流水线）
 python src/answer_eval/run.py --set tasks          # Agent 多步任务集
 python src/answer_eval/run.py --reuse              # 只用缓存重算，零 LLM 调用
+python src/answer_eval/run.py --run agent_v2 --reuse --check   # 只复算、与已有 metrics.json 逐项比对，不写文件（pytest 用它核对已提交的 8 份评测）
 python src/answer_eval/run.py --run baseline --set tasks --frozen   # 旧系统的缓存答案 + 新评审
 python src/answer_eval/compare.py baseline agent_v1 [--set tasks]   # 两次评测并排对比
 python src/answer_eval/probe.py                    # 评审灵敏度测试
